@@ -1,0 +1,28 @@
+---
+# GUI 版（Standalone）。
+#
+# **安裝本身不由 ansible 做**：這個 cask 的內容是 .pkg（Tailscale-x.y.z-macos.pkg），brew 會
+# 在安裝途中自己叫 sudo。ansible 底下沒有 TTY，sudo 問不了密碼；又不能用 become 跑 brew
+# （Homebrew 拒絕以 root 執行）。所以安裝列為「要密碼的一次性手動步驟」，這個 tag 只負責
+# 檢查有沒有裝、沒裝就印出指令。brew 仍然記得它（漂移檢查的白名單裡有它）。
+#
+# 登入 tailnet 與打開「登入時啟動」也是手動（帳號登入不帶進自動化）。
+#
+# 限制：GUI 版要使用者登入之後才會跑，開機解鎖之前與 GUI 登入之前都連不到。
+# 只有開源版 tailscaled 能在登入前啟動，但它不能和 GUI 版同時安裝。
+# 要不要改用它等 HANDOFF §9 重開機實測完再決定（見 DESIGN.md）。
+- name: Tailscale 有沒有裝
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew }}", list, --cask, "{{ mac_node_tailscale_cask }}"]
+  register: _tailscale_cask
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: 還沒裝：要在終端機自己跑（會問密碼）
+  ansible.builtin.debug:
+    msg: >-
+      Tailscale 還沒裝。它的安裝檔是 .pkg，要 sudo 密碼，請在終端機自己跑：
+      brew install --cask {{ mac_node_tailscale_cask }}
+      裝完打開 Tailscale、登入，並打開「登入時啟動」。
+  when: _tailscale_cask.rc != 0

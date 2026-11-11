@@ -1,0 +1,14 @@
+---
+# iPhone 捷徑「抵達」家時經由 SSH 執行。只放確定、可以重複執行的步驟；
+# 沒有命令列可用的 GUI 操作不要用 computer use 硬做。
+- name: ~/bin 目錄
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/bin"
+    state: directory
+    mode: "0755"
+
+- name: ~/bin/arrive-home.sh
+  ansible.builtin.template:
+    src: arrive-home.sh.j2
+    dest: "{{ mac_node_home }}/bin/arrive-home.sh"
+    mode: "0755"

@@ -1,0 +1,64 @@
+---
+# 對外用的 key（GitHub 等）。命名與註解慣例沿用 wsl-bootstrap：
+#   ~/.ssh/id_ed25519_<tag>_<scope>，無 passphrase，註解 <comment>-<scope> <日期>
+# **key 已存在就不動**（key 是資料，不重生）。
+# 非預設檔名的 key 一定要配 ~/.ssh/config，否則 ssh 根本不會拿它去用（wsl-bootstrap 踩過）。
+# 公鑰只印出來，貼到 GitHub 是手動。
+- name: ssh_key_comment 必須在 config.yml 填好
+  ansible.builtin.assert:
+    that:
+      - ssh_key_comment | length > 0
+      - ssh_key_comment != 'you@macbook-pro'
+    fail_msg: "config.yml 的 ssh_key_comment 還是空的或範本值（慣例：<user>@<環境識別>）"
+    quiet: true
+
+- name: ~/.ssh 目錄
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.ssh"
+    state: directory
+    mode: "0700"
+
+- name: 生成 key（已存在就跳過）
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/ssh-keygen
+      - -t
+      - ed25519
+      - -N
+      - ""
+      - -C
+      - "{{ ssh_key_comment }}-{{ item }} {{ ansible_facts.date_time.date }}"
+      - -f
+      - "{{ mac_node_home }}/.ssh/id_ed25519_{{ ssh_key_tag }}_{{ item }}"
+    creates: "{{ mac_node_home }}/.ssh/id_ed25519_{{ ssh_key_tag }}_{{ item }}"
+  loop: "{{ ssh_key_scopes }}"
+
+# 只管自己的 managed 區塊，檔案裡其他內容不動。
+- name: ~/.ssh/config 的 managed 區塊
+  ansible.builtin.blockinfile:
+    path: "{{ mac_node_home }}/.ssh/config"
+    create: true
+    mode: "0600"
+    marker: "# {mark} mac-bootstrap ssh-keys (managed)"
+    block: |
+      {% for scope in ssh_key_scopes %}
+      Host {{ mac_node_ssh_scope_hosts[scope] | default(scope) }}
+          User git
+          IdentityFile ~/.ssh/id_ed25519_{{ ssh_key_tag }}_{{ scope }}
+          IdentitiesOnly yes
+      {% endfor %}
+
+- name: 讀公鑰
+  ansible.builtin.slurp:
+    src: "{{ mac_node_home }}/.ssh/id_ed25519_{{ ssh_key_tag }}_{{ item }}.pub"
+  loop: "{{ ssh_key_scopes }}"
+  register: _pubkeys
+  when: not ansible_check_mode
+
+- name: 公鑰（手動貼到對應平台）
+  ansible.builtin.debug:
+    msg: "{{ item.item }}: {{ item.content | b64decode | trim }}"
+  loop: "{{ _pubkeys.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not ansible_check_mode

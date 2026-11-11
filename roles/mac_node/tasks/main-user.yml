@@ -1,0 +1,63 @@
+---
+# user 層：不用 sudo。每個 import 掛 [user, <自己>]，相依用 tag 表達（同 dev-env-ansible）：
+#
+#   tmux.yml    [user, tmux, claude-rc]     ← claude-rc 要 tmux
+#   claude.yml  [user, claude, claude-rc]   ← claude-rc 要 claude
+#   profile.yml [user, profile, tmux, claude, claude-rc]  ← 影響 PATH 的都帶 profile
+#
+# 加東西的規矩：(1) 給它自己的 tag 並掛 user；(2) 它需要什麼，就把它的 tag 掛到那些
+# 前置的 import 上；(3) 影響 PATH 就把 tag 加到 profile 那行；(4) 回 list.yml 補一行；
+# (5) 裝 brew 套件就回 defaults 的 mac_node_brew_allowed_* 補一行。
+
+- name: 偵測環境
+  ansible.builtin.import_tasks: detect.yml
+  tags: always
+
+# 只給 make list / make verify 用，什麼都不改。never 讓一般 install 掃不到。
+- name: 項目一覽（唯讀）
+  ansible.builtin.import_tasks: list.yml
+  tags: [list, never]
+
+- name: 驗收（唯讀）
+  ansible.builtin.import_tasks: verify.yml
+  tags: [verify, never]
+
+# ---- 可安裝的項目 ------------------------------------------------------------
+- name: tmux
+  ansible.builtin.import_tasks: tmux.yml
+  tags: [user, tmux, claude-rc]
+
+- name: Claude Code CLI
+  ansible.builtin.import_tasks: claude.yml
+  tags: [user, claude, claude-rc]
+
+- name: Tailscale（GUI 版）
+  ansible.builtin.import_tasks: tailscale.yml
+  tags: [user, tailscale]
+
+- name: git 身分
+  ansible.builtin.import_tasks: git-identity.yml
+  tags: [user, git-identity]
+
+- name: 對外用的 SSH key
+  ansible.builtin.import_tasks: ssh-keys.yml
+  tags: [user, ssh-keys]
+
+- name: 允許登入這台的公鑰
+  ansible.builtin.import_tasks: authorized-keys.yml
+  tags: [user, authorized-keys]
+
+- name: 到家就緒腳本
+  ansible.builtin.import_tasks: arrive-home.yml
+  tags: [user, arrive-home]
+
+# ---- 收尾 -------------------------------------------------------------------
+# profile 放在 claude-rc 前面：伺服器啟動時 PATH 必須已經對。
+# 內容看機器上實際有什麼（stat），不看開關。
+- name: PATH 環境設定（~/.zshenv + ~/.zprofile）
+  ansible.builtin.import_tasks: profile.yml
+  tags: [user, profile, tmux, claude, claude-rc]
+
+- name: Remote Control 常駐伺服器
+  ansible.builtin.import_tasks: claude-rc.yml
+  tags: [user, claude-rc]

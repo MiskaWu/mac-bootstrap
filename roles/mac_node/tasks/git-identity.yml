@@ -1,0 +1,20 @@
+---
+# 全域身分：遠端工作階段會在 ~/Developer 底下各個 repo commit，不能只設在單一 repo。
+- name: git 身分必須在 config.yml 填好
+  ansible.builtin.assert:
+    that:
+      - git_user_name is defined and git_user_name | length > 0 and git_user_name != 'Your Name'
+      - git_user_email is defined and git_user_email | length > 0 and git_user_email != 'you@example.com'
+    fail_msg: "config.yml 的 git_user_name / git_user_email 還是空的或範本值"
+    quiet: true
+
+- name: 設定全域 git 身分
+  community.general.git_config:
+    scope: global
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+  loop:
+    - { key: user.name, value: "{{ git_user_name }}" }
+    - { key: user.email, value: "{{ git_user_email }}" }
+  loop_control:
+    label: "{{ item.key }}"

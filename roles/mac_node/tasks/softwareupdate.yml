@@ -1,0 +1,11 @@
+---
+# 關掉 macOS 自動安裝，避免半夜自己重開（重開後要 FileVault 解鎖，人在外面就救不回來）。
+# 只關「自動安裝 macOS 更新」，安全性回應與系統資料檔照常自動裝。
+# 系統設定 → 一般 → 軟體更新 →「自動更新」的畫面狀態請人工確認一次。
+- name: 關掉自動安裝 macOS 更新
+  community.general.osx_defaults:
+    domain: /Library/Preferences/com.apple.SoftwareUpdate
+    key: AutomaticallyInstallMacOSUpdates
+    type: bool
+    value: false
+    state: present

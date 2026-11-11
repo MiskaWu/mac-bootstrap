@@ -1,0 +1,9 @@
+# {{ ansible_managed }}：來源 mac-bootstrap roles/mac_node/templates/010-hardening.conf.j2
+#
+# 一般 SSH 只允許金鑰登入。檔名用 010- 是為了排在 macOS 自帶的 100-macos.conf 前面：
+# OpenSSH 以第一個讀到的值為準，sshd_config.d 按字母順序載入。
+#
+# 不影響 FileVault 開機前的 SSH 解鎖：那時資料磁碟區還鎖著，這個檔根本讀不到（HANDOFF §9 實測）。
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no

@@ -1,0 +1,28 @@
+---
+# 官方 native installer，裝到 ~/.local/bin/claude（同 dev-env-ansible 的 claude.yml）。
+# creates 保證冪等；pipefail 是必要的：curl 失敗時 bash 收到空輸入、乾淨結束，
+# pipeline 回 0，task 綠燈但機器上沒有 binary，而 creates 事後不驗。
+# ~/.local/bin 的 PATH 由 profile.yml 統一管。
+#
+# 裝完要手動做一次 /login（瀏覽器 OAuth），不由這裡做。
+- name: 安裝 Claude Code（native installer）
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      curl -fsSL https://claude.ai/install.sh | bash
+    creates: "{{ mac_node_claude_bin }}"
+    executable: /bin/bash
+
+- name: 確認 claude 在預期的位置
+  ansible.builtin.stat:
+    path: "{{ mac_node_claude_bin }}"
+  register: _claude_bin
+  check_mode: false
+
+# --check 時 installer 不會真的跑，所以只在非 check 時斷言。
+- name: claude 必須存在
+  ansible.builtin.assert:
+    that: _claude_bin.stat.exists
+    fail_msg: "installer 跑完卻找不到 {{ mac_node_claude_bin }}"
+    quiet: true
+  when: not ansible_check_mode

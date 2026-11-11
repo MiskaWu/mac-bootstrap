@@ -1,0 +1,24 @@
+---
+# 允許登入這台的公鑰（Windows 桌機、iPhone 捷徑…）。
+# **只新增，不移除**（exclusive: false）：手動加過的 key 不會被清掉，也不會因為
+# config.yml 少貼一把就把自己鎖在外面。要撤銷一把 key 請手動編輯 authorized_keys。
+- name: ~/.ssh 目錄
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.ssh"
+    state: directory
+    mode: "0700"
+
+- name: 加入公鑰
+  ansible.posix.authorized_key:
+    user: "{{ ansible_facts.user_id }}"
+    key: "{{ item }}"
+    state: present
+    exclusive: false
+  loop: "{{ ssh_authorized_keys }}"
+  loop_control:
+    label: "{{ item.split(' ')[2] | default(item[:30]) }}"
+
+- name: 提醒：沒有任何公鑰
+  ansible.builtin.debug:
+    msg: "config.yml 的 ssh_authorized_keys 是空的。TAGS=sshd 會拒絕在沒有公鑰時關掉密碼登入。"
+  when: ssh_authorized_keys | length == 0

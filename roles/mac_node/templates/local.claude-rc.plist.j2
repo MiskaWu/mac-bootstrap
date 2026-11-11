@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- {{ ansible_managed }}：來源 mac-bootstrap roles/mac_node/templates/local.claude-rc.plist.j2 -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{ claude_rc_label }}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <!-- zsh -l：讀 ~/.zprofile。腳本裡一律用絕對路徑，不靠 PATH -->
+    <string>/bin/zsh</string>
+    <string>-l</string>
+    <string>{{ mac_node_home | e }}/bin/claude-rc-server.sh</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <!-- 每 5 分鐘檢查一次：tmux 被關掉也會自己補回來 -->
+  <key>StartInterval</key><integer>300</integer>
+  <!-- 腳本跑完就結束；不讓 launchd 順手清掉它留下的 tmux server -->
+  <key>AbandonProcessGroup</key><true/>
+  <key>StandardOutPath</key><string>{{ claude_rc_log_dir | e }}/claude-rc.log</string>
+  <key>StandardErrorPath</key><string>{{ claude_rc_log_dir | e }}/claude-rc.err.log</string>
+</dict>
+</plist>

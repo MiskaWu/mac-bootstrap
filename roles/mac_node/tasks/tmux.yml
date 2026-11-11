@@ -1,0 +1,7 @@
+---
+# Remote Control 伺服器要在終端機裡才跑得起來；沒有視窗開著時由 tmux 提供，
+# 也讓人可以隨時 `tmux attach -t claude-rc` 進去看輸出。
+- name: 安裝 tmux
+  community.general.homebrew:
+    name: tmux
+    state: present

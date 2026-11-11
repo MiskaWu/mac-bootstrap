@@ -1,0 +1,42 @@
+---
+# 兩個 play，界線是「要不要 sudo」：
+#
+#   user   不用 sudo。Claude 可以直接跑。
+#   system 整個 play 開 become。由 Miska 在終端機跑；Makefile 會自動加 -K 問密碼。
+#
+# 每個 import 除了自己的名字，也掛上所在層的 tag（user / system），所以
+# `make install TAGS=user` 是「所有不用 sudo 的」，`TAGS=system` 是「所有要 sudo 的」。
+#
+# **不要把 user / system 改掛在 play 上。** play 的 tag 會被底下每個 task 繼承，
+# 包括 list / verify 那種 `[xxx, never]` 的唯讀項目 —— 而 never 只要被點到「其他任何
+# 一個 tag」就會跑，於是 `TAGS=user` 會連 list 與 verify 一起跑。
+#
+# Makefile 從 `--list-tags` 找名字以 "mac_node system" 開頭的 play，讀出哪些 tag 要 -K。
+# 改 play 名字要一起改 Makefile 的 _SYSTEM_TAGS_OF。
+#
+# system 層 gather_facts: false —— fact 收集固定會跑（always），若在 become 的 play 收，
+# 只跑 user 層的 tag 也會因為沒有密碼而失敗。facts 在同一次執行裡沿用 user 層收到的。
+
+- name: mac_node user（不用 sudo）
+  hosts: all
+  gather_facts: true
+  vars:
+    # 用跑 ansible 的那個 Python，不要讓它自己挑到系統的 python 3.9
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  tasks:
+    - name: user 層
+      ansible.builtin.import_role:
+        name: mac_node
+        tasks_from: main-user.yml
+
+- name: mac_node system（要 sudo）
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  tasks:
+    - name: system 層
+      ansible.builtin.import_role:
+        name: mac_node
+        tasks_from: main-system.yml

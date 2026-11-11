@@ -1,0 +1,245 @@
+---
+# make verify：HANDOFF §8 驗收清單裡能在本機自動檢查的部分。唯讀，什麼都不改。
+# 對應 wsl-bootstrap 的 scripts/verify.sh。
+#
+# 每項檢查是一段 bash：exit 0 = 通過；exit 2 = 這裡測不了、要人工；其他 = 沒通過。
+# level: fail 沒通過算失敗（最後 exit 非零）；warn 只提醒。
+# 印出的第一行輸出當作說明。
+#
+# 寫檢查的規矩（同 dev-env-ansible「別把 exit code 洗掉」）：要判成敗就先
+# `out=$(cmd)` 再對 $out 檢查，不要 `cmd | grep | sed` 讓最後一個指令決定成敗。
+# Jinja 在這裡會先跑一遍：不要寫 `$` 後面接 `{#`（Jinja 的註解開頭）。
+
+- name: 跑檢查
+  ansible.builtin.shell:
+    cmd: "{{ item.cmd }}"
+    executable: /bin/bash
+  loop:
+    # ---- 電源 ----
+    - name: "pmset：接電源時不睡、可網路喚醒"
+      level: fail
+      cmd: |
+        ac=$(/usr/bin/pmset -g custom | awk '/^AC Power:/ {f=1; next} /^[^ ]/ {f=0} f')
+        bad=""
+        {% for k, v in mac_node_pmset_ac.items() %}
+        grep -Eq '^ +{{ k }} +{{ v }}$' <<<"$ac" || bad="$bad {{ k }}"
+        {% endfor %}
+        [ -z "$bad" ] || { echo "不符：$bad（make install TAGS=power）"; exit 1; }
+        echo "sleep 0、womp 1 等 {{ mac_node_pmset_ac | length }} 項都對"
+
+    - name: "pmset：蓋子模式 {{ mac_lid_mode }}"
+      level: fail
+      cmd: |
+        have=$(/usr/bin/pmset -g | awk '$1=="SleepDisabled" {print $2}')
+        want={{ '1' if mac_lid_mode == 'C' else '0' }}
+        [ "$have" = "$want" ] || [ -z "$have" -a "$want" = 0 ] || { echo "disablesleep=$have，應為 $want"; exit 1; }
+        echo "disablesleep=$want"
+
+    - name: "關掉自動安裝 macOS 更新"
+      level: fail
+      cmd: |
+        v=$(defaults read /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates 2>/dev/null || echo unset)
+        [ "$v" = 0 ] || { echo "AutomaticallyInstallMacOSUpdates=$v（make install TAGS=softwareupdate）"; exit 1; }
+        echo "已關閉"
+
+    # ---- 主機與安全 ----
+    - name: "主機名稱"
+      level: fail
+      cmd: |
+        want={{ (mac_host_name | default('')) | quote }}
+        [ -n "$want" ] || { echo "config.yml 沒有 mac_host_name"; exit 2; }
+        have=$(/usr/sbin/scutil --get LocalHostName)
+        [ "$have" = "$want" ] || { echo "LocalHostName=$have，應為 $want（make install TAGS=hostname）"; exit 1; }
+        echo "$have.local"
+
+    - name: "FileVault 開著"
+      level: fail
+      cmd: |
+        out=$(/usr/bin/fdesetup status)
+        grep -q 'FileVault is On' <<<"$out" || { echo "$out"; exit 1; }
+        echo "On"
+
+    - name: "遠端登入（SSH）在聽"
+      level: fail
+      cmd: |
+        /usr/bin/nc -z -G 2 127.0.0.1 22 || { echo "22 埠沒開：系統設定 → 一般 → 共享 → 遠端登入（手動）"; exit 1; }
+        echo "22 埠有回應"
+
+    - name: "螢幕共享在聽"
+      level: fail
+      cmd: |
+        /usr/bin/nc -z -G 2 127.0.0.1 5900 || { echo "5900 埠沒開：系統設定 → 一般 → 共享 → 螢幕共享（手動）"; exit 1; }
+        echo "5900 埠有回應"
+
+    - name: "sshd 只允許金鑰登入"
+      level: fail
+      cmd: |
+        [ -f /etc/ssh/sshd_config.d/010-hardening.conf ] || { echo "沒有 010-hardening.conf（make install TAGS=sshd）"; exit 1; }
+        out=$(sudo -n /usr/sbin/sshd -T 2>/dev/null) || { echo "設定檔在；生效值要 root 才讀得到，請手動跑：sudo sshd -T | grep -E 'passwordauth|kbdinteractive'"; exit 2; }
+        grep -qx 'passwordauthentication no' <<<"$out" && grep -qx 'kbdinteractiveauthentication no' <<<"$out" \
+          || { echo "sshd -T 的生效值不對"; exit 1; }
+        echo "passwordauthentication no、kbdinteractiveauthentication no"
+
+    - name: "authorized_keys 有公鑰"
+      level: fail
+      cmd: |
+        f={{ (mac_node_home ~ '/.ssh/authorized_keys') | quote }}
+        [ -s "$f" ] || { echo "沒有任何公鑰（make install TAGS=authorized-keys）"; exit 1; }
+        echo "$(grep -c . "$f") 把"
+
+    # ---- Claude ----
+    - name: "Claude Code CLI"
+      level: fail
+      cmd: |
+        b={{ mac_node_claude_bin | quote }}
+        [ -x "$b" ] || { echo "找不到 $b（make install TAGS=claude）"; exit 1; }
+        "$b" --version 2>&1 | head -1
+
+    - name: "登入 shell 沒有會弄壞 Remote Control 的變數"
+      level: fail
+      cmd: |
+        out=$(env -i HOME="$HOME" USER="$USER" /bin/zsh -l -c env 2>&1)
+        bad=$(grep -E '^(ANTHROPIC_BASE_URL|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC|DISABLE_GROWTHBOOK)=' <<<"$out" | cut -d= -f1 || true)
+        [ -z "$bad" ] || { echo "~/.zprofile 或系統設定了：$bad"; exit 1; }
+        echo "沒有"
+
+    - name: "LaunchAgent {{ claude_rc_label }} 已載入"
+      level: fail
+      cmd: |
+        /bin/launchctl print gui/{{ ansible_facts.user_uid }}/{{ claude_rc_label }} >/dev/null 2>&1 \
+          || { echo "沒載入（make install TAGS=claude-rc）"; exit 1; }
+        echo "已載入"
+
+    - name: "tmux session {{ claude_rc_session }} 在跑"
+      level: fail
+      cmd: |
+        t={{ mac_node_tmux_bin | quote }}
+        [ -x "$t" ] || { echo "沒有 tmux"; exit 1; }
+        "$t" has-session -t ={{ claude_rc_session }} 2>/dev/null || { echo "session 不在（等 5 分鐘內 LaunchAgent 重建，或 launchctl kickstart）"; exit 1; }
+        echo "在"
+
+    - name: "Remote Control 沒有卡在第一次的確認問題"
+      level: fail
+      cmd: |
+        t={{ mac_node_tmux_bin | quote }}
+        out=$("$t" capture-pane -p -t ={{ claude_rc_session }} 2>/dev/null) || { echo "讀不到 tmux 畫面"; exit 1; }
+        if grep -qiE 'enable remote control|trust (this|the)|do you trust|spawn mode' <<<"$out"; then
+          echo "卡在問題上：先在真的終端機手動跑一次 claude remote-control 回答兩個 y，再 tmux kill-session -t {{ claude_rc_session }}"
+          exit 1
+        fi
+        last=$(grep -v '^[[:space:]]*$' <<<"$out" | tail -1 || true)
+        echo "畫面最後一行：$last"
+
+    - name: "Remote Control 伺服器的環境是乾淨的"
+      level: fail
+      cmd: |
+        # 錨在行首：只抓 argv[0] 是 claude 的那支，不要抓到這段檢查自己的 bash 或外層的 zsh -c
+        pids=$(pgrep -f '^[^ ]*/claude remote-control' || true)
+        [ -n "$pids" ] || { echo "沒有找到 remote-control 程序"; exit 1; }
+        for p in $pids; do
+          envs=$(ps eww -o command= -p "$p" 2>/dev/null || true)
+          if grep -qE '(^| )(CLAUDECODE|ANTHROPIC_BASE_URL|CLAUDE_CODE_SESSION_ID)=' <<<"$envs"; then
+            echo "程序 $p 帶著 Claude 工作階段的變數：它不是由 launchd 起的。tmux kill-session 後讓 LaunchAgent 重建"
+            exit 1
+          fi
+        done
+        echo "程序 $(echo $pids | tr '\n' ' ')沒有帶到工作階段的變數"
+
+    - name: "~/.zshenv 與 ~/.zprofile 都有 managed 區塊"
+      level: fail
+      cmd: |
+        for f in .zshenv .zprofile; do
+          grep -q 'BEGIN mac-bootstrap profile' "$HOME/$f" 2>/dev/null || { echo "$f 沒有（make install TAGS=profile）"; exit 1; }
+        done
+        echo "兩個都有"
+
+    # 用互動 shell 驗一定是綠的，驗不出東西。模擬兩種真正會出事的情境（research §6.3）。
+    - name: "非互動 shell 拿得到指令（模擬 ssh 'cmd' 與 LaunchAgent）"
+      level: fail
+      cmd: |
+        want="make brew"
+        [ -x {{ mac_node_claude_bin | quote }} ] && want="$want claude"
+        [ -x {{ mac_node_tmux_bin | quote }} ] && want="$want tmux"
+        bad=""
+        for mode in ssh launchd; do
+          flag=""; [ $mode = launchd ] && flag="-l"
+          for c in $want; do
+            p=$(env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh $flag -c "command -v $c" 2>/dev/null || true)
+            [ -n "$p" ] || { bad="$bad $mode:$c"; continue; }
+            # make 一定要是 GNU 4.x，不能是 /usr/bin/make（path_helper 重排的那個坑）
+            if [ $c = make ] && [ "$p" = /usr/bin/make ]; then bad="$bad $mode:make=3.81"; fi
+          done
+        done
+        [ -z "$bad" ] || { echo "拿不到或拿錯：$bad"; exit 1; }
+        echo "ssh 與 launchd 兩種情境都拿得到：$want"
+
+    - name: "全域 git 身分"
+      level: fail
+      cmd: |
+        e=$(git config --global user.email || true)
+        [ -n "$e" ] || { echo "沒設（make install TAGS=git-identity）"; exit 1; }
+        echo "$(git config --global user.name) <$e>"
+
+    # ---- 遠端通道 ----
+    - name: "Tailscale 已安裝並在跑"
+      level: fail
+      cmd: |
+        [ -d /Applications/Tailscale.app ] || { echo "沒裝（make install TAGS=tailscale）"; exit 1; }
+        pgrep -xq Tailscale || { echo "裝了但沒在跑：打開它並登入，設定「登入時啟動」（手動）"; exit 1; }
+        echo "在跑（登入狀態請在選單列確認）"
+
+    - name: "Chrome 遠端桌面主機在跑"
+      level: warn
+      cmd: |
+        [ -f /Library/LaunchAgents/org.chromium.chromoting.plist ] || { echo "沒裝（不由 IaC 管，要用請自己裝）"; exit 1; }
+        pgrep -fq remoting_me2me_host || { echo "裝了但沒在跑"; exit 1; }
+        echo "在跑"
+
+    - name: "目前的網路"
+      level: warn
+      cmd: |
+        ifc=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
+        port=$(networksetup -listallhardwareports | awk -v i="$ifc" '/^Hardware Port:/ {p=substr($0, 16)} $2==i {print p}')
+        if [ "$port" = "Wi-Fi" ]; then echo "走 Wi-Fi（$ifc）：開機前的 SSH 解鎖在 Wi-Fi 上可能不行，建議接有線"; exit 1; fi
+        echo "走 $port（$ifc）"
+
+    # ---- 乾淨原則 ----
+    - name: "brew 沒有 IaC 以外的套件"
+      level: warn
+      cmd: |
+        brew={{ mac_node_brew | quote }}
+        [ -x "$brew" ] || { echo "沒有 Homebrew"; exit 1; }
+        extra_f=$(comm -23 <("$brew" leaves | sort) <(printf '%s\n' {{ mac_node_brew_allowed_formulae | map('quote') | join(' ') }} | sort))
+        extra_c=$(comm -23 <("$brew" list --cask -1 | sort) <(printf '%s\n' {{ mac_node_brew_allowed_casks | map('quote') | join(' ') }} | sort))
+        if [ -n "$extra_f$extra_c" ]; then
+          echo "多出來的：$(echo $extra_f $extra_c)（只報告不移除；要留就加進 IaC，不要就自己 brew uninstall）"
+          exit 1
+        fi
+        echo "只有 IaC 宣告的"
+  loop_control:
+    label: "{{ item.name }}"
+  register: _verify
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: 驗收結果
+  ansible.builtin.debug:
+    msg: |-
+      ✓ 通過   ✗ 沒通過   ⚠ 提醒或要人工確認
+      {% for r in _verify.results %}
+      {% set mark = '✓' if r.rc == 0 else ('✗' if (r.item.level == 'fail' and r.rc != 2) else '⚠') %}
+      {{ mark }} {{ r.item.name }} — {{ (r.stdout_lines | first) if r.stdout_lines else (r.stderr_lines | first | default('')) }}
+      {% endfor %}
+
+- name: 有沒通過的項目就失敗
+  ansible.builtin.assert:
+    that: _verify_failed | length == 0
+    fail_msg: "沒通過：{{ _verify_failed | join('、') }}"
+    success_msg: "能自動檢查的都通過了。HANDOFF §8 其餘項目（手機連線、拔網路、重開機）要人工測。"
+  vars:
+    _verify_failed: >-
+      {{ _verify.results
+         | selectattr('item.level', 'equalto', 'fail')
+         | rejectattr('rc', 'in', [0, 2])
+         | map(attribute='item.name') | list }}

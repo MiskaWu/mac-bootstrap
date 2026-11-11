@@ -1,0 +1,11 @@
+*.retry
+*.log
+
+# 機器專屬的值（主機名稱、git 身分、公鑰）：只放本機，不進版控。範本是 config.example.yml。
+config.yml
+# 這台的實測紀錄，會有區網 IP 與 Tailscale 名稱。
+SETUP-LOG.md
+
+# Claude Code 的拋棄式 worktree 與個人覆寫（同 dev-env-ansible）
+.claude/worktrees/
+.claude/settings.local.json

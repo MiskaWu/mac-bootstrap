@@ -1,0 +1,54 @@
+---
+# PATH 與環境變數：一份由 ansible 產生的 env.zsh，從 ~/.zshenv 與 ~/.zprofile 各 source 一次。
+#
+# 為什麼兩個地方（research/language-versions.md §6，實測）：
+#   - `ssh mac '<cmd>'` 是非登入、非互動的 zsh，**只讀 ~/.zshenv**，起始 PATH 只有
+#     /usr/bin:/bin:/usr/sbin:/sbin（sshd-session 寫死的）。
+#   - LaunchAgent 的 `zsh -l` 依序讀 ~/.zshenv → /etc/zprofile（跑 path_helper）→ ~/.zprofile。
+#     **path_helper 會把 .zshenv 先加的路徑排到 /usr/bin 後面**，於是 GNU make 輸給
+#     /usr/bin/make（3.81）。所以 .zprofile 要再 source 一次，把順序排回來。
+#   - Linux 那邊「symlink 進 /usr/local/bin」在 Mac 上沒用：ssh 與 launchd 的預設 PATH 都
+#     沒有它，而且它不存在、建它要 sudo。
+#
+# env.zsh 的規矩：每個 zsh 都會讀（包括 #!/bin/zsh 的腳本），所以**沒有副作用、沒有輸出、
+# 不開子程序**。不要在裡面跑 `brew shellenv`，改寫成靜態的等價內容。
+# 內容讀「機器上實際有什麼」（stat），不讀開關（同 dev-env-ansible 的 profile.yml）。
+#
+# 加一個會影響 PATH 的 tag 時：(1) 在下面的 stat 清單與 env.zsh.j2 各補一段；
+# (2) 在 main-user.yml 把那個 tag 掛到 profile 那行。
+- name: 偵測要放進 PATH 的東西
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ mac_node_brew }}"
+    - "{{ mac_node_brew_prefix }}/opt/make/libexec/gnubin"
+    - "{{ mac_node_home }}/.local/bin"
+  register: _profile_paths
+  check_mode: false
+
+- name: 整理偵測結果
+  ansible.builtin.set_fact:
+    _have: "{{ dict(_profile_paths.results | map(attribute='item') | zip(_profile_paths.results | map(attribute='stat.exists'))) }}"
+
+- name: ~/.config/mac-bootstrap 目錄
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.config/mac-bootstrap"
+    state: directory
+    mode: "0755"
+
+- name: env.zsh
+  ansible.builtin.template:
+    src: env.zsh.j2
+    dest: "{{ mac_node_home }}/.config/mac-bootstrap/env.zsh"
+    mode: "0644"
+
+- name: ~/.zshenv 與 ~/.zprofile 的 managed block
+  ansible.builtin.blockinfile:
+    path: "{{ mac_node_home }}/{{ item }}"
+    create: true
+    mode: "0644"
+    marker: "# {mark} mac-bootstrap profile (managed)"
+    block: |
+      # PATH 與環境變數由 mac-bootstrap 管（make install TAGS=profile），內容見這個檔
+      [[ -r "$HOME/.config/mac-bootstrap/env.zsh" ]] && source "$HOME/.config/mac-bootstrap/env.zsh"
+  loop: [.zshenv, .zprofile]

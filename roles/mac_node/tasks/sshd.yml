@@ -1,0 +1,47 @@
+---
+# 一般 SSH 只允許金鑰登入。drop-in 檔，不碰 /etc/ssh/sshd_config 本體。
+# macOS 的 sshd 是 launchd 依連線啟動的，新設定對下一條連線就生效，不用重啟。
+#
+# **防呆：authorized_keys 沒有任何 key 就拒絕套用**，免得把自己鎖在外面。
+# 套用前請先從另一台機器確認金鑰登得進來（HANDOFF 階段 3）。
+- name: 讀 authorized_keys
+  ansible.builtin.stat:
+    path: "{{ mac_node_home }}/.ssh/authorized_keys"
+  register: _authkeys
+  check_mode: false
+
+- name: 沒有公鑰就不關密碼登入
+  ansible.builtin.assert:
+    that: _authkeys.stat.exists and _authkeys.stat.size > 0
+    fail_msg: >-
+      {{ mac_node_home }}/.ssh/authorized_keys 不存在或是空的。先 make install TAGS=authorized-keys，
+      並從另一台機器確認金鑰登得進來，再套用這個 tag。
+    quiet: true
+
+- name: /etc/ssh/sshd_config.d/010-hardening.conf
+  ansible.builtin.template:
+    src: 010-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/010-hardening.conf
+    owner: root
+    group: wheel
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+
+- name: 讀實際生效的設定
+  ansible.builtin.command:
+    argv: [/usr/sbin/sshd, -T]
+  register: _sshd_t
+  changed_when: false
+  check_mode: false
+
+# --check 時檔案沒有真的寫，生效值還是舊的，所以只在非 check 時斷言。
+- name: 確認生效
+  ansible.builtin.assert:
+    that:
+      - "'passwordauthentication no' in _sshd_t.stdout_lines"
+      - "'kbdinteractiveauthentication no' in _sshd_t.stdout_lines"
+      - "'permitrootlogin no' in _sshd_t.stdout_lines"
+      - "'pubkeyauthentication yes' in _sshd_t.stdout_lines"
+    fail_msg: "sshd -T 的生效值不對，檢查 /etc/ssh/sshd_config.d/ 的載入順序"
+    quiet: true
+  when: not ansible_check_mode

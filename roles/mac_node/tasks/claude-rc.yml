@@ -1,0 +1,122 @@
+---
+# Remote Control 常駐伺服器：LaunchAgent → claude-rc-server.sh → tmux → 自動重啟迴圈。
+#
+# 為什麼是 LaunchAgent 不是 LaunchDaemon：Agent 跑在使用者的 GUI 登入工作階段，才讀得到
+# Keychain 裡的 Claude 登入資訊。代價是要等 GUI 登入（見 CLAUDE.md 重開機那條）。
+#
+# **只能由 launchd 啟動伺服器**。在 Claude 的工作階段裡手動跑 claude-rc-server.sh，
+# tmux 會繼承那個工作階段的幾十個 CLAUDE_* / ANTHROPIC_* 變數，Remote Control 就壞了。
+# 腳本另外用 env -i 起乾淨環境當第二道保險。
+#
+# 第一次要在真的終端機手動跑一次 `claude remote-control`，回答兩個 y（Enable / Trust）。
+# 沒做的話迴圈會卡在問題上，看起來卻像正常在跑 —— make verify 會抓出來。
+
+- name: 前置：tmux 與 claude 必須存在
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ mac_node_tmux_bin }}"
+    - "{{ mac_node_claude_bin }}"
+  register: _rc_prereq
+  check_mode: false
+
+- name: 前置檢查
+  ansible.builtin.assert:
+    that: _rc_prereq.results | map(attribute='stat.exists') | min
+    fail_msg: "缺少 tmux 或 claude。TAGS=claude-rc 會一起帶 tmux 與 claude，若仍缺請看前面的錯誤。"
+    quiet: true
+  when: not ansible_check_mode
+
+- name: 決定根目錄
+  ansible.builtin.set_fact:
+    _rc_workdir: "{{ claude_rc_workdir if (claude_rc_workdir | length > 0) else mac_node_home ~ '/Developer' }}"
+
+- name: 根目錄必須存在
+  ansible.builtin.stat:
+    path: "{{ _rc_workdir }}"
+  register: _rc_workdir_stat
+  check_mode: false
+
+- name: 根目錄檢查
+  ansible.builtin.assert:
+    that: _rc_workdir_stat.stat.isdir | default(false)
+    fail_msg: "Remote Control 根目錄 {{ _rc_workdir }} 不存在"
+    quiet: true
+
+- name: ~/bin 目錄
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/bin"
+    state: directory
+    mode: "0755"
+
+# ~/Library/Logs 是系統建的（0700），只確保存在，不改它的權限。
+- name: log 目錄
+  ansible.builtin.file:
+    path: "{{ claude_rc_log_dir }}"
+    state: directory
+
+- name: ~/bin/claude-rc-server.sh
+  ansible.builtin.template:
+    src: claude-rc-server.sh.j2
+    dest: "{{ mac_node_home }}/bin/claude-rc-server.sh"
+    mode: "0755"
+  register: _rc_script
+
+- name: LaunchAgent plist
+  ansible.builtin.template:
+    src: local.claude-rc.plist.j2
+    dest: "{{ mac_node_home }}/Library/LaunchAgents/{{ claude_rc_label }}.plist"
+    mode: "0644"
+    validate: /usr/bin/plutil -lint %s
+  register: _rc_plist
+
+# ---- 載入（冪等）--------------------------------------------------------------
+# 不用 community.general.launchd：它走舊的 load / unload。這裡用 bootstrap / bootout，
+# 先 print 看有沒有載入，再決定要做什麼。
+- name: LaunchAgent 有沒有載入
+  ansible.builtin.command:
+    argv: [/bin/launchctl, print, "gui/{{ ansible_facts.user_uid }}/{{ claude_rc_label }}"]
+  register: _rc_print
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# 腳本換了：舊的 tmux session 還在跑舊指令，要收掉才會用新的重建。
+# 會中斷正在連線的遠端工作階段，所以只在腳本內容真的變了才做。
+- name: 腳本變了 → 收掉舊的 tmux session
+  ansible.builtin.shell:
+    cmd: |
+      if {{ mac_node_tmux_bin }} has-session -t ={{ claude_rc_session }} 2>/dev/null; then
+        {{ mac_node_tmux_bin }} kill-session -t ={{ claude_rc_session }}
+        echo killed
+      fi
+    executable: /bin/bash
+  register: _rc_kill
+  changed_when: "'killed' in _rc_kill.stdout"
+  when: _rc_script.changed
+
+- name: plist 變了 → 先卸載
+  ansible.builtin.command:
+    argv: [/bin/launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ claude_rc_label }}"]
+  when: _rc_plist.changed and _rc_print.rc == 0
+
+# bootout 是非同步的，緊接著 bootstrap 可能拿到 "5: Input/output error"，所以重試。
+- name: 載入 LaunchAgent
+  ansible.builtin.command:
+    argv:
+      - /bin/launchctl
+      - bootstrap
+      - "gui/{{ ansible_facts.user_uid }}"
+      - "{{ mac_node_home }}/Library/LaunchAgents/{{ claude_rc_label }}.plist"
+  register: _rc_bootstrap
+  retries: 5
+  delay: 2
+  until: _rc_bootstrap.rc == 0
+  when: _rc_print.rc != 0 or _rc_plist.changed
+
+# RunAtLoad 只在 bootstrap 時跑一次。只有腳本變、plist 沒變時，要自己踢一下，
+# 不然要等 StartInterval（5 分鐘）才會重建 tmux session。
+- name: 腳本變了 → 立刻跑一次
+  ansible.builtin.command:
+    argv: [/bin/launchctl, kickstart, "gui/{{ ansible_facts.user_uid }}/{{ claude_rc_label }}"]
+  when: _rc_script.changed and not (_rc_bootstrap is changed)

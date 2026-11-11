@@ -1,0 +1,14 @@
+#!/bin/zsh -l
+# {{ ansible_managed }}
+# 來源：mac-bootstrap。要改開哪些 App，改 config.yml 的 arrive_home_apps / arrive_home_urls，
+# 再 make install TAGS=arrive-home。
+#
+# 由 iPhone 捷徑「抵達」家時經由 SSH 執行。只放確定、可以重複執行的步驟。
+set -u
+{% for app in arrive_home_apps %}
+open -a {{ app | quote }}
+{% endfor %}
+{% for url in arrive_home_urls %}
+open {{ url | quote }}
+{% endfor %}
+echo "[$(date)] arrive-home done"

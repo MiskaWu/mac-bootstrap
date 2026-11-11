@@ -1,0 +1,36 @@
+#!/bin/zsh
+# {{ ansible_managed }}
+# 來源：mac-bootstrap roles/mac_node/templates/claude-rc-server.sh.j2，改這裡沒用，改 repo 再 make install TAGS=claude-rc。
+#
+# 由 LaunchAgent {{ claude_rc_label }} 每 5 分鐘呼叫一次。冪等：tmux session 在就什麼都不做。
+# session 裡是無限迴圈，claude 結束（例如斷網約 10 分鐘後伺服器自己退出）後 10 秒重啟。
+#
+# **不要在 Claude 的工作階段裡手動跑這支**：雖然下面有 env -i，tmux server 若由那裡
+# 起出來，之後從它開的其他 session 仍會帶著那堆 CLAUDE_* 變數。要重建就：
+#   launchctl kickstart gui/$(id -u)/{{ claude_rc_label }}
+
+SESSION={{ claude_rc_session | quote }}
+WORKDIR={{ _rc_workdir | quote }}
+TMUX_BIN={{ mac_node_tmux_bin | quote }}
+CLAUDE_BIN={{ mac_node_claude_bin | quote }}
+
+for b in "$TMUX_BIN" "$CLAUDE_BIN"; do
+  [[ -x "$b" ]] || { echo "[$(date)] missing: $b" >&2; exit 1; }
+done
+[[ -d "$WORKDIR" ]] || { echo "[$(date)] missing dir: $WORKDIR" >&2; exit 1; }
+
+# `=` 前綴：精確比對 session 名稱，不要被 tmux 的前綴比對誤判。
+"$TMUX_BIN" has-session -t "=$SESSION" 2>/dev/null && exit 0
+
+# 乾淨環境：只放行少數變數，PATH 交給 zsh -l 讀 ~/.zprofile 重建。
+env_args=(-i SHELL=/bin/zsh TERM=xterm-256color)
+for v in {{ claude_rc_env_passthrough | join(' ') }}; do
+  [[ -n "${(P)v}" ]] && env_args+=("$v=${(P)v}")
+done
+
+# 迴圈本體交給乾淨環境裡的 zsh -l 跑。
+LOOP={{ ('while true; do ' ~ (mac_node_claude_bin | quote) ~ ' remote-control --name ' ~ (claude_rc_name | quote) ~ ' --spawn ' ~ (claude_rc_spawn | quote) ~ '; rc=$?; echo "[$(date)] claude exited rc=$rc, restart in 10s"; sleep 10; done') | quote }}
+
+"$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \
+  /usr/bin/env "${env_args[@]}" /bin/zsh -l -c "$LOOP"
+echo "[$(date)] started tmux session $SESSION in $WORKDIR"

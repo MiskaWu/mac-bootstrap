@@ -1,0 +1,30 @@
+---
+# 三個名稱：ComputerName（顯示用，可有空白）、HostName 與 LocalHostName（xxx.local，
+# 只能英數與連字號）。scutil 沒有 ansible 模組，先讀再改，不同才 set。
+- name: 主機名稱必須在 config.yml 填好
+  ansible.builtin.assert:
+    that:
+      - mac_computer_name is defined and mac_computer_name | length > 0
+      - mac_host_name is defined and mac_host_name is match('^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$')
+    fail_msg: "config.yml 的 mac_computer_name 不能空；mac_host_name 只能英數與連字號"
+    quiet: true
+
+- name: 目前的名稱
+  ansible.builtin.command:
+    argv: [/usr/sbin/scutil, --get, "{{ item }}"]
+  loop: [ComputerName, HostName, LocalHostName]
+  register: _scutil_get
+  changed_when: false
+  # HostName 沒設過時 scutil 回 1（"HostName: not set"），那是「要設」不是錯誤
+  failed_when: false
+  check_mode: false
+
+- name: 設定名稱（不同才改）
+  ansible.builtin.command:
+    argv: [/usr/sbin/scutil, --set, "{{ item.item }}", "{{ _want }}"]
+  loop: "{{ _scutil_get.results }}"
+  loop_control:
+    label: "{{ item.item }} → {{ _want }}"
+  vars:
+    _want: "{{ mac_computer_name if item.item == 'ComputerName' else mac_host_name }}"
+  when: item.rc != 0 or item.stdout != _want

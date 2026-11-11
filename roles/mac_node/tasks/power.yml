@@ -1,0 +1,59 @@
+---
+# 接電源時：永不睡眠、螢幕 10 分鐘後關、可被網路喚醒（值在 defaults 的 mac_node_pmset_ac）。
+# pmset 沒有 ansible 模組，先讀 `pmset -g custom` 的 AC Power 區段，不同的才改。
+#
+# 蓋子：A / B 只是放法，系統層不用改；C 要 `pmset -a disablesleep 1`（蓋上也不睡）。
+# 不是 C 時確保 disablesleep 是 0 —— 避免哪次試過 C 忘了改回來。
+- name: mac_lid_mode 只能是 A / B / C
+  ansible.builtin.assert:
+    that: mac_lid_mode in ['A', 'B', 'C']
+    fail_msg: "mac_lid_mode 只能是 A / B / C（現在是 {{ mac_lid_mode }}）"
+    quiet: true
+
+- name: 讀目前的 pmset 設定
+  ansible.builtin.command:
+    argv: [/usr/bin/pmset, -g, custom]
+  register: _pmset_custom
+  changed_when: false
+  check_mode: false
+
+# AC Power: 之後、下一個不是空白開頭的行之前。只取「一個字的 key + 一個值」的行
+# （"Sleep On Power Button 1" 那種多字的 key 不會被抓到，也用不到）。
+#
+# 反斜線一律寫兩個、不用 '\1' 這種 backref：Jinja 的字串字面值會做 unicode-escape，
+# '\1' 會變成 chr(1)，'\n' 會變成真的換行。用 regex_findall 直接拿 group，就不需要 backref。
+- name: 解析 AC Power 區段
+  ansible.builtin.set_fact:
+    _pm_ac: >-
+      {{ dict(_pmset_custom.stdout
+              | regex_findall('AC Power:\\n((?:[ \\t].*\\n?)*)') | first | default('')
+              | regex_findall('(?m)^\\s+(\\w+)\\s+(\\S+)\\s*$')) }}
+
+- name: 設定接電源時的值（不同才改）
+  ansible.builtin.command:
+    argv: [/usr/bin/pmset, -c, "{{ item.key }}", "{{ item.value }}"]
+  loop: "{{ mac_node_pmset_ac | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}: {{ _pm_ac[item.key] | default('?') }} → {{ item.value }}"
+  when: (_pm_ac[item.key] | default('')) | string != item.value | string
+
+- name: 讀 disablesleep
+  ansible.builtin.command:
+    argv: [/usr/bin/pmset, -g]
+  register: _pmset_g
+  changed_when: false
+  check_mode: false
+
+- name: 蓋子（disablesleep）
+  ansible.builtin.command:
+    argv: [/usr/bin/pmset, -a, disablesleep, "{{ _want }}"]
+  vars:
+    # YAML 單引號：反斜線原樣交給 Jinja（見上面「反斜線寫兩個」那條）
+    _have: '{{ _pmset_g.stdout | regex_findall(''SleepDisabled\\s+(\\d)'') | first | default(''0'') }}'
+    _want: "{{ '1' if mac_lid_mode == 'C' else '0' }}"
+  when: _have != _want
+
+- name: 提醒：蓋子選 C
+  ansible.builtin.debug:
+    msg: "mac_lid_mode=C：蓋上也不睡，有散熱風險。絕對不能放進包包，帶出門前改回 A 並重跑 TAGS=power。"
+  when: mac_lid_mode == 'C'

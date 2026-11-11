@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# mac-bootstrap config
+# -----------------------------------------------------------------------------
+# 複製這份成 config.yml 再改。config.yml 已被 .gitignore 忽略（機器專屬、含個人資料）。
+#   cp config.example.yml config.yml
+#
+# Makefile 會用 `-e @config.yml` 把它餵給 ansible。用到某個值的 task 會先 assert，
+# 沒填就大聲失敗，不會靜默套用空值。
+# =============================================================================
+
+# ---- 主機名稱（TAGS=hostname，要 sudo）---------------------------------------
+# 顯示用（Finder、AirDrop），可以有空白。
+mac_computer_name: "MacBook Pro"
+# HostName 與 LocalHostName（xxx.local）共用，只能英數與連字號。
+mac_host_name: "MacBook-Pro"
+
+# ---- 電源（TAGS=power，要 sudo）---------------------------------------------
+# 蓋子怎麼放：
+#   A = 開蓋放著，螢幕自己關（預設）
+#   B = 接外接螢幕加電源，用闔蓋模式
+#   C = pmset disablesleep 1，蓋上也不睡。有散熱風險，絕對不能放進包包，
+#       帶出門前必須改回 A 並重跑 TAGS=power。
+mac_lid_mode: A
+
+# ---- git 身分（TAGS=git-identity）------------------------------------------
+git_user_name: "Your Name"
+git_user_email: "you@example.com"
+
+# ---- 對外用的 SSH key（TAGS=ssh-keys）---------------------------------------
+# 命名沿用 wsl-bootstrap：~/.ssh/id_ed25519_<tag>_<scope>，無 passphrase。
+# 註解慣例：<user>@<環境識別>，task 會再接上 -<scope> 與生成日期。
+# 公鑰只印出來，貼到 GitHub 是手動。
+ssh_key_tag: mac
+ssh_key_comment: "you@macbook-pro"
+ssh_key_scopes:
+  - github
+
+# ---- 允許登入這台的公鑰（TAGS=authorized-keys）------------------------------
+# 一行一把完整的公鑰。只會新增，不會刪掉檔案裡其他的 key。
+ssh_authorized_keys: []
+#  - "ssh-ed25519 AAAA... you@windows-desktop"
+#  - "ssh-ed25519 AAAA... iphone-shortcuts"
+
+# ---- Remote Control（TAGS=claude-rc）---------------------------------------
+# 手機 / claude.ai/code 上看到的名字。
+claude_rc_name: home-mac
+# 根目錄：same-dir 模式下，所有遠端工作階段從這裡開始。留空 = ~/Developer。
+claude_rc_workdir: ""
+
+# ---- 到家就緒（TAGS=arrive-home）-------------------------------------------
+# iPhone 捷徑「抵達」時經由 SSH 執行 ~/bin/arrive-home.sh。
+# 只放確定、可以重複執行的：App 名稱給 `open -a`，URL 給 `open`。
+arrive_home_apps: []
+#  - "Music"
+arrive_home_urls: []
+#  - "someapp://some/path"

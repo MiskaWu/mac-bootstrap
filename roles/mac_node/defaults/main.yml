@@ -1,0 +1,56 @@
+---
+# 機器專屬的值（主機名稱、git 身分、公鑰…）不在這裡，在 config.yml（範本 config.example.yml）。
+# 這裡只放「每台都一樣」的預設，以及 config.yml 沒填時的退路。
+
+mac_node_home: "{{ ansible_facts.env.HOME }}"
+mac_node_brew_prefix: /opt/homebrew
+mac_node_brew: "{{ mac_node_brew_prefix }}/bin/brew"
+
+# ---- 電源 -------------------------------------------------------------------
+# pmset -c（只管接電源時）。這台的用途是常駐節點：永不睡眠、螢幕 10 分鐘後關、可被網路喚醒。
+mac_node_pmset_ac:
+  sleep: 0
+  disksleep: 0
+  displaysleep: 10
+  womp: 1
+  tcpkeepalive: 1
+mac_lid_mode: A
+
+# ---- Claude Code / Remote Control --------------------------------------------
+mac_node_claude_bin: "{{ mac_node_home }}/.local/bin/claude"
+mac_node_tmux_bin: "{{ mac_node_brew_prefix }}/bin/tmux"
+claude_rc_label: local.claude-rc
+claude_rc_session: claude-rc
+claude_rc_name: home-mac
+claude_rc_workdir: ""
+claude_rc_spawn: same-dir
+claude_rc_log_dir: "{{ mac_node_home }}/Library/Logs"
+# 不要讓 Claude 工作階段的環境漏進 Remote Control 伺服器（理由見 CLAUDE.md 地雷）。
+# 伺服器用 env -i 起一個乾淨環境，只放行這幾個；PATH 由 zsh -l 讀 ~/.zprofile 重建。
+claude_rc_env_passthrough: [HOME, USER, LOGNAME, TMPDIR, SSH_AUTH_SOCK, LANG]
+
+# ---- Tailscale ---------------------------------------------------------------
+# GUI 版（Standalone）。cask 名稱會改，換之前先 `brew info --cask <名稱>` 確認。
+mac_node_tailscale_cask: tailscale-app
+
+# ---- ssh ---------------------------------------------------------------------
+ssh_key_tag: mac
+ssh_key_comment: ""
+ssh_key_scopes: [github]
+ssh_authorized_keys: []
+# scope → Host 的對應，同 wsl-bootstrap。沒列的原樣當 Host。
+mac_node_ssh_scope_hosts:
+  github: github.com
+  gitlab: gitlab.com
+  bitbucket: bitbucket.org
+
+# ---- 到家就緒 ----------------------------------------------------------------
+arrive_home_apps: []
+arrive_home_urls: []
+
+# ---- 漂移檢查（make verify）--------------------------------------------------
+# brew 上「允許存在」的頂層套件。多出來的 make verify 會列出來（只報告，不移除）。
+# 來源：make 由 bootstrap.sh 裝、ansible 由 Makefile 裝、其餘由各自的 task 檔裝。
+# 加一個 brew 套件的 task 時，回來這裡補一行。
+mac_node_brew_allowed_formulae: [make, ansible, tmux]
+mac_node_brew_allowed_casks: ["{{ mac_node_tailscale_cask }}"]

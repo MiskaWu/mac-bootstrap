@@ -1,0 +1,33 @@
+---
+# make list：有哪些項目、這台已經有哪些。唯讀，什麼都不改。
+# ✓ / · 是當場 stat 出來的，不是文件裡的宣稱。
+# 往 main-user.yml / main-system.yml 加一個 import 時，回這裡補一行。
+- name: 偵測
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop:
+    - { tag: tmux,            path: "{{ mac_node_tmux_bin }}",                                                   desc: "tmux（Remote Control 伺服器的終端機）" }
+    - { tag: claude,          path: "{{ mac_node_claude_bin }}",                                                 desc: "Claude Code CLI" }
+    - { tag: tailscale,       path: /Applications/Tailscale.app,                                                 desc: "Tailscale GUI 版（登入手動）" }
+    - { tag: git-identity,    path: "{{ mac_node_home }}/.gitconfig",                                            desc: "全域 git 身分" }
+    - { tag: ssh-keys,        path: "{{ mac_node_home }}/.ssh/id_ed25519_{{ ssh_key_tag }}_{{ ssh_key_scopes | first | default('github') }}", desc: "對外用的 SSH key 與 ~/.ssh/config" }
+    - { tag: authorized-keys, path: "{{ mac_node_home }}/.ssh/authorized_keys",                                  desc: "允許登入這台的公鑰" }
+    - { tag: arrive-home,     path: "{{ mac_node_home }}/bin/arrive-home.sh",                                    desc: "到家就緒腳本" }
+    - { tag: profile,         path: "{{ mac_node_home }}/.config/mac-bootstrap/env.zsh",                         desc: "PATH（~/.zshenv 與 ~/.zprofile 各 source 一次）" }
+    - { tag: claude-rc,       path: "{{ mac_node_home }}/Library/LaunchAgents/{{ claude_rc_label }}.plist",     desc: "Remote Control 常駐伺服器（LaunchAgent + tmux）" }
+    - { tag: hostname,        path: /dev/null,                                                                    desc: "主機名稱（sudo；設定類，看 make verify）" }
+    - { tag: power,           path: /dev/null,                                                                    desc: "接電源永不睡眠（sudo；設定類，看 make verify）" }
+    - { tag: softwareupdate,  path: /dev/null,                                                                    desc: "關掉自動安裝 macOS 更新（sudo；設定類，看 make verify）" }
+    - { tag: sshd,            path: /etc/ssh/sshd_config.d/010-hardening.conf,                                    desc: "sshd 只允許金鑰登入（sudo）" }
+  loop_control:
+    label: "{{ item.tag }}"
+  register: _list
+  check_mode: false
+
+- name: 項目一覽
+  ansible.builtin.debug:
+    msg: |-
+      ✓ = 這台已經有   · = 還沒有   ○ = 設定類，狀態看 make verify
+      {% for r in _list.results %}
+      {{ '○' if r.item.path == '/dev/null' else ('✓' if r.stat.exists else '·') }} {{ '%-16s' | format(r.item.tag) }} {{ r.item.desc }}
+      {% endfor %}

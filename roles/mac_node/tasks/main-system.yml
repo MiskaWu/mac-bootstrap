@@ -1,0 +1,19 @@
+---
+# system 層：整個 play 是 become。每個 import 掛 [system, <自己>]。
+# Makefile 從這個 play 的 TASK TAGS 判斷要不要加 -K，所以這裡的 tag 不能跟 user 層重複。
+
+- name: 主機名稱
+  ansible.builtin.import_tasks: hostname.yml
+  tags: [system, hostname]
+
+- name: 電源與不休眠
+  ansible.builtin.import_tasks: power.yml
+  tags: [system, power]
+
+- name: 關掉 macOS 自動安裝更新
+  ansible.builtin.import_tasks: softwareupdate.yml
+  tags: [system, softwareupdate]
+
+- name: sshd 只允許金鑰登入
+  ansible.builtin.import_tasks: sshd.yml
+  tags: [system, sshd]
