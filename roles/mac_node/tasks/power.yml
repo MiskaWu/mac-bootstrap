@@ -20,14 +20,22 @@
 # AC Power: 之後、下一個不是空白開頭的行之前。只取「一個字的 key + 一個值」的行
 # （"Sleep On Power Button 1" 那種多字的 key 不會被抓到，也用不到）。
 #
-# 反斜線一律寫兩個、不用 '\1' 這種 backref：Jinja 的字串字面值會做 unicode-escape，
-# '\1' 會變成 chr(1)，'\n' 會變成真的換行。用 regex_findall 直接拿 group，就不需要 backref。
+# **反斜線只寫一個**，而且只寫在不會再處理跳脫的地方（YAML 的 >- 區塊、或 YAML 單引號）。
+# 實測 ansible-core 2.21：Jinja 字串字面值裡的反斜線原樣交給 re，`\\n` 會變成「比對反斜線
+# 加 n」而什麼都對不上（第一次套用時就這樣：五項全顯示 `? → 0`，每次跑都 changed）。
+# 舊版 Jinja 會做 unicode-escape，行為不同；換 ansible 大版本時重驗這條。
 - name: 解析 AC Power 區段
   ansible.builtin.set_fact:
     _pm_ac: >-
       {{ dict(_pmset_custom.stdout
-              | regex_findall('AC Power:\\n((?:[ \\t].*\\n?)*)') | first | default('')
-              | regex_findall('(?m)^\\s+(\\w+)\\s+(\\S+)\\s*$')) }}
+              | regex_findall('AC Power:\n((?:[ \t].*\n?)*)') | first | default('')
+              | regex_findall('(?m)^\s+(\w+)\s+(\S+)\s*$')) }}
+
+- name: 解析失敗就停（避免每次都把所有值重設一遍、還報 changed）
+  ansible.builtin.assert:
+    that: mac_node_pmset_ac.keys() | difference(_pm_ac.keys()) | length == 0
+    fail_msg: "讀不到 pmset -g custom 的 AC Power 區段：{{ _pm_ac }}"
+    quiet: true
 
 - name: 設定接電源時的值（不同才改）
   ansible.builtin.command:
@@ -48,8 +56,8 @@
   ansible.builtin.command:
     argv: [/usr/bin/pmset, -a, disablesleep, "{{ _want }}"]
   vars:
-    # YAML 單引號：反斜線原樣交給 Jinja（見上面「反斜線寫兩個」那條）
-    _have: '{{ _pmset_g.stdout | regex_findall(''SleepDisabled\\s+(\\d)'') | first | default(''0'') }}'
+    # YAML 單引號：反斜線原樣交給 Jinja，只寫一個（見上面那條）
+    _have: '{{ _pmset_g.stdout | regex_findall(''SleepDisabled\s+(\d)'') | first | default(''0'') }}'
     _want: "{{ '1' if mac_lid_mode == 'C' else '0' }}"
   when: _have != _want
 
