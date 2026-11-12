@@ -136,13 +136,15 @@
       level: fail
       cmd: |
         t={{ mac_node_tmux_bin | quote }}
-        out=$("$t" capture-pane -p -t ={{ claude_rc_session }} 2>/dev/null) || { echo "讀不到 tmux 畫面"; exit 1; }
-        if grep -qiE 'enable remote control|trust (this|the)|do you trust|spawn mode' <<<"$out"; then
-          echo "卡在問題上：先在真的終端機手動跑一次 claude remote-control 回答兩個 y，再 tmux kill-session -t {{ claude_rc_session }}"
+        # 目標要寫 =name:（結尾冒號）。只寫 =name，capture-pane 會當成 pane 名稱而找不到。
+        out=$("$t" capture-pane -p -t ={{ claude_rc_session }}: 2>/dev/null) || { echo "讀不到 tmux 畫面"; exit 1; }
+        # 2.1.322 的信任問題長這樣：「Trust /Users/…/Developer? [y/N]」
+        if grep -qiE 'enable remote control|trust (this|the|/)|do you trust|spawn mode|quick safety check|\[y/n\]' <<<"$out"; then
+          echo "卡在問題上：先在真的終端機手動跑一次 claude remote-control 回答問題，再 tmux kill-session -t {{ claude_rc_session }}"
           exit 1
         fi
-        last=$(grep -v '^[[:space:]]*$' <<<"$out" | tail -1 || true)
-        echo "畫面最後一行：$last"
+        grep -q 'Connected' <<<"$out" || { echo "畫面上沒有 Connected：$(grep -v '^[[:space:]]*$' <<<"$out" | tail -1)"; exit 1; }
+        echo "$(grep -m1 'Connected' <<<"$out" | sed 's/^[^A-Za-z]*//')"
 
     - name: "Remote Control 伺服器的環境是乾淨的"
       level: fail
