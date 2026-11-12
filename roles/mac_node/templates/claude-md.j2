@@ -1,0 +1,13 @@
+# 這台 Mac 的規矩（由 ~/Developer/mac-bootstrap 管理，make install TAGS=claude-md）
+
+- **主機要保持乾淨。** 開發工具與多個版本一律隔離：用專案自己的版本宣告、git worktree、podman 容器。
+  不要全域安裝東西（`brew install`、`npm i -g`、`pip install`、`cargo install`、`uv tool install`、`go install`）；真的需要就先問 Miska。
+- **這台的設定是 IaC。** 系統設定、常駐服務、PATH、要裝的工具都在 `~/Developer/mac-bootstrap`（Ansible + make）。
+  要改就改那個 repo 再 `make install TAGS=<項目>`，不要直接動 `~/.zshenv`、`~/.zprofile`、LaunchAgent 或 `/etc`。
+- **Python 一律 `uv run` / `uv sync`**（專案的 `.venv`，版本由 `.python-version` / `requires-python` 宣告）。
+  主機 PATH 上刻意沒有 uv 管的 Python（`UV_PYTHON_INSTALL_BIN=0`），`python3` 會是系統的 3.9.6，不要用它。
+- **Node** 是 `~/.local/node`（{{ node_version }}）。專案要別的版本：`package.json` 的 `devEngines.runtime` 交給 pnpm 下載，再不行就進容器。
+- **Go** 由 `go.mod` 的 `toolchain` 宣告（`GOTOOLCHAIN=auto` 自動下載）；**Rust** 由 `rust-toolchain.toml` 宣告。
+- **容器用 podman**（沒有 Docker Desktop、沒有 `/var/run/docker.sock`，`DOCKER_HOST` 已設好）。
+  VM 平常是關的：用之前 `podman machine start`，用完 `podman machine stop`。
+- 本地 AI（MLX、PyTorch MPS）要用 Metal，只能在主機跑：每個專案一個 uv 專案，模型快取在 `~/.cache/huggingface`。

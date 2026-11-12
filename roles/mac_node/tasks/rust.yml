@@ -1,0 +1,72 @@
+---
+# Rust：官方 rustup-init，裝到 ~/.rustup、~/.cargo（同 Linux）。不用 brew 的 rustup：
+# keg-only、關掉 self-update、不附 rustup-init，rustup 官方也不維護套件管理器版本（research §2）。
+# 專案版本由 rust-toolchain.toml 宣告，rustup 的 proxy 讀到就自動安裝。
+# linker 靠 Command Line Tools（bootstrap.sh 之前就要有）。
+- name: rustup 裝了沒
+  ansible.builtin.stat:
+    path: "{{ mac_node_home }}/.cargo/bin/rustup"
+  register: _rustup
+  check_mode: false
+
+- name: 乾跑：會用 rustup-init 安裝
+  ansible.builtin.debug:
+    msg: "會下載 https://sh.rustup.rs 並以 -y --no-modify-path --profile {{ rust_profile }} 安裝"
+  changed_when: true
+  when: ansible_check_mode and not _rustup.stat.exists
+
+# --check 時 tempfile 不會給路徑，整段跳過（上面那則代替它報告）。
+- name: 用官方 rustup-init 安裝
+  when: not _rustup.stat.exists and not ansible_check_mode
+  block:
+    - name: 暫存目錄
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: -mac-bootstrap-rustup
+      register: _rustup_tmp
+
+    - name: 下載 rustup-init.sh
+      ansible.builtin.get_url:
+        url: https://sh.rustup.rs
+        dest: "{{ _rustup_tmp.path }}/rustup-init.sh"
+        mode: "0755"
+
+    # --no-modify-path：rustup 預設會**建立** ~/.zshenv 並加一行 source，違反「rc 檔只有
+    # mac-bootstrap 的 managed block」。PATH 由 env.zsh 處理。
+    - name: rustup-init -y --no-modify-path --profile {{ rust_profile }}
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - "{{ _rustup_tmp.path }}/rustup-init.sh"
+          - -y
+          - --no-modify-path
+          - --profile
+          - "{{ rust_profile }}"
+          - -c
+          - "{{ rust_components | join(',') }}"
+      changed_when: true
+
+  always:
+    - name: 清掉暫存
+      ansible.builtin.file:
+        path: "{{ _rustup_tmp.path }}"
+        state: absent
+      when: _rustup_tmp.path is defined
+
+# 收斂：沒有預設工具鏈才設 stable（同 Linux）。已經有就不動，尊重手動改過的預設。
+- name: 讀預設工具鏈
+  ansible.builtin.command:
+    argv: ["{{ mac_node_home }}/.cargo/bin/rustup", default]
+  register: _rust_default
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: 沒有預設工具鏈 → stable
+  ansible.builtin.command:
+    argv: ["{{ mac_node_home }}/.cargo/bin/rustup", default, stable]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _rust_default.rc != 0 or 'no default' in (_rust_default.stdout ~ _rust_default.stderr)

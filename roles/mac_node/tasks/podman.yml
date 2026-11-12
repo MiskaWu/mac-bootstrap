@@ -1,0 +1,40 @@
+---
+# 容器：brew 的 podman 加 podman machine（Mac 預設 provider 是 libkrun，相依的 krunkit 會一起裝）。
+# **不裝** podman.io 的 .pkg（root 的 podman-mac-helper LaunchDaemon、/etc/paths.d、/opt/podman）、
+# podman-desktop。沒有 /var/run/docker.sock，一律靠 DOCKER_HOST（env.zsh 會設，research §4）。
+#
+# 機器只建不啟動：用到時 `podman machine start`，用完 `podman machine stop`（Miska 核准：
+# 不開機自動啟動，VM 開著就占記憶體）。配額見 defaults 的 podman_machine_*。
+- name: podman（brew）
+  community.general.homebrew:
+    name: podman
+    state: latest
+
+- name: machine 在不在
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/podman", machine, inspect, "{{ podman_machine_name }}"]
+  register: _podman_machine
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+# 會下載 VM 映像檔（約 1 GB），第一次要幾分鐘。配額只在建立時生效；要改得先
+# `podman machine rm` 再重跑（或用 `podman machine set`，CPU/記憶體可以、磁碟只能加大）。
+- name: podman machine init（只建不啟動）
+  ansible.builtin.command:
+    argv:
+      - "{{ mac_node_brew_prefix }}/bin/podman"
+      - machine
+      - init
+      - --cpus
+      - "{{ podman_machine_cpus }}"
+      - --memory
+      - "{{ podman_machine_memory }}"
+      - --disk-size
+      - "{{ podman_machine_disk }}"
+      - "{{ podman_machine_name }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _podman_machine.rc != 0

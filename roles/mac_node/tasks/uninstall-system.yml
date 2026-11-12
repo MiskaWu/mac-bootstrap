@@ -1,0 +1,52 @@
+---
+# system 層的移除（要 sudo）。規矩同 uninstall-user.yml：必須點名 TAGS，沒有乾跑。
+#
+# 沒有 uninstall 的 system 項目：
+#   - hostname：名字是宣告式的設定，不是「裝上去的東西」。要改回原名就改 config.yml 的
+#     mac_computer_name / mac_host_name 再 make install TAGS=hostname（原名記在 SETUP-LOG）。
+#   Makefile 的 _check-uninstall-tags 會對它印出這段說明，而不是「沒有這個 tag」。
+
+# ---- sshd 只收金鑰 -----------------------------------------------------------
+- name: sshd 硬化設定
+  tags: [sshd]
+  block:
+    - name: 刪 /etc/ssh/sshd_config.d/010-hardening.conf
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/010-hardening.conf
+        state: absent
+
+    - name: sshd —— 說明
+      ansible.builtin.debug:
+        msg: >-
+          已移除：SSH 回到 macOS 的預設（又接受密碼登入、root 規則照系統預設）。新連線就生效，
+          不用重啟。遠端登入本身（系統設定 → 一般 → 共享）沒有動，要關請自己關。
+
+# ---- 自動安裝 macOS 更新 ------------------------------------------------------
+# 刪掉這個 key = 回到「系統設定 → 一般 → 軟體更新」自己的預設，而不是硬設成 true。
+- name: 自動安裝 macOS 更新
+  tags: [softwareupdate]
+  block:
+    - name: 拿掉 AutomaticallyInstallMacOSUpdates
+      community.general.osx_defaults:
+        domain: /Library/Preferences/com.apple.SoftwareUpdate
+        key: AutomaticallyInstallMacOSUpdates
+        state: absent
+
+# ---- 電源 --------------------------------------------------------------------
+# 「還原」= 收斂回設定前的值（config.yml 的 mac_node_pmset_ac_original，每台不一樣）。
+# 重用 power.yml 的「讀現況、不同才改」，只是把目標換掉；蓋子回到 A（disablesleep 0）。
+- name: 電源 —— 還原前檢查
+  tags: [power]
+  ansible.builtin.assert:
+    that: mac_node_pmset_ac_original is defined and mac_node_pmset_ac_original is mapping
+    fail_msg: >-
+      config.yml 沒有 mac_node_pmset_ac_original（這台設定前的 pmset -c 值），不知道要還原成什麼。
+      範本見 config.example.yml；這台的原值記在 SETUP-LOG「開始前的環境」。
+    quiet: true
+
+- name: 電源 —— 還原成設定前的值
+  tags: [power]
+  ansible.builtin.import_tasks: power.yml
+  vars:
+    mac_node_pmset_ac: "{{ mac_node_pmset_ac_original }}"
+    mac_lid_mode: A

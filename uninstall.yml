@@ -1,0 +1,50 @@
+---
+# `make uninstall TAGS=<項目>` 的入口（同 dev-env-ansible 的 uninstall.yml）。
+#
+# ---- 為什麼獨立成一個 playbook，不併進 site.yml ------------------------------
+# ansible 的 `--tags` 是 **OR**：`--tags uninstall,go` 會連 site.yml 裡「安裝 Go」那段一起
+# 選中。tag 之間沒有 AND，「移除語境下的 go」沒辦法用 tag 組合表達。獨立 playbook 之後，
+# `--tags go` 在這個檔裡只有一種意思，install 那邊完全不受影響。
+#
+# ---- 結構同 site.yml：兩個 play ----------------------------------------------
+# user（不用 sudo）與 system（要 sudo）。system 那個 play 的名字**必須以 "mac_node system"
+# 開頭**：Makefile 靠它判斷這次要不要 -K（問 sudo 密碼）。
+#
+# user play 的順序固定三段：detect → 移除（uninstall-user.yml，順序是安裝的反向）→
+# 依移除後的現況重生 env.zsh。最後一段讓 PATH、UV_PYTHON_INSTALL_BIN、DOCKER_HOST 自動退掉，
+# 不必在移除邏輯裡另外處理（profile.yml 是偵測式的）。這次移除的就是 profile 本身時跳過。
+- name: mac_node user 移除（不用 sudo）
+  hosts: all
+  gather_facts: true
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  tasks:
+    - name: 偵測環境
+      ansible.builtin.import_role:
+        name: mac_node
+        tasks_from: detect.yml
+      tags: always
+
+    - name: 移除
+      ansible.builtin.import_role:
+        name: mac_node
+        tasks_from: uninstall-user.yml
+
+    - name: PATH 環境設定（依移除後的機器現況重生）
+      ansible.builtin.import_role:
+        name: mac_node
+        tasks_from: profile.yml
+      when: "'profile' not in ansible_run_tags"
+      tags: always
+
+- name: mac_node system 移除（要 sudo）
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  tasks:
+    - name: 移除
+      ansible.builtin.import_role:
+        name: mac_node
+        tasks_from: uninstall-system.yml

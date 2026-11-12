@@ -1,0 +1,592 @@
+---
+# user 層的移除（make uninstall TAGS=<項目>；DATA=1 連資料一起清）。同 dev-env-ansible 的設計：
+#
+#   1. **必須點名 TAGS，不帶就拒絕**（Makefile 的 _check-uninstall-tags）。install 不帶 TAGS 是
+#      「全裝」，uninstall 不帶 TAGS 是「拒絕」—— 這個指令沒有「全砍」的意思。
+#   2. **工具與資料分開**：預設只移除工具本身；快取、下載的 runtime、VM 磁碟留著並報告大小，
+#      加 DATA=1 才刪。你的東西（~/.claude、cargo 的 config/credentials、私鑰）DATA=1 也不動。
+#   3. **沒有 uninstall 的乾跑**：--check 對「移除」只會說「會 changed」，講不出連帶後果，
+#      給的是假的安全感。安全靠 1、2 和下面每一項的防呆。
+#
+# 順序是安裝的**反向**：先拆用到別人的（claude-rc 用 claude 和 tmux），最後拆 profile。
+# brew 裝的項目：brew 在還有別的套件依賴它時會拒絕移除，所以可以自動化（Linux 的 apt 不行）。
+# 拆完再 `brew autoremove` 帶走只被它需要的相依（例如 podman 的 krunkit）。
+#
+# 加一個新項目時：給它一個跟 install 端同名的 tag、移除工具、把資料路徑登記到
+# `_uninstall_data`（DATA=1 會刪）或 `_uninstall_keep`（永遠保留，只報告）。
+
+- name: 準備累加器
+  ansible.builtin.set_fact:
+    _uninstall_done: []
+    _uninstall_data: []
+    _uninstall_keep: []
+    _uninstall_brew: false
+    # 收尾時「空了就刪」的目錄（rmdir，不空就留著）：例如 ~/.cargo 拆完只剩空殼。
+    _uninstall_rmdir: []
+    _u_home: "{{ mac_node_home }}"
+    _u_plist: "{{ mac_node_home }}/Library/LaunchAgents/{{ claude_rc_label }}.plist"
+  tags: always
+
+# ---- Remote Control 常駐伺服器 ----------------------------------------------
+- name: Remote Control 常駐伺服器
+  tags: [claude-rc]
+  block:
+    - name: claude-rc —— 說明
+      ansible.builtin.debug:
+        msg: >-
+          停掉 Remote Control：手機 / claude.ai/code 上這台的工作階段會全部結束。
+          要重新裝回來：make install TAGS=claude-rc。
+
+    - name: 讀 LaunchAgent 狀態
+      ansible.builtin.command:
+        argv: [/bin/launchctl, print, "gui/{{ ansible_facts.user_uid }}/{{ claude_rc_label }}"]
+      register: _u_rc_loaded
+      changed_when: false
+      failed_when: false
+
+    - name: 卸載 LaunchAgent
+      ansible.builtin.command:
+        argv: [/bin/launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ claude_rc_label }}"]
+      changed_when: true
+      when: _u_rc_loaded.rc == 0
+
+    # Remote Control 在 tmux 裡跑；session 關掉，迴圈和 claude 一起結束（SIGHUP）。
+    - name: 關掉 tmux session
+      ansible.builtin.command:
+        argv: ["{{ mac_node_tmux_bin }}", kill-session, -t, "={{ claude_rc_session }}"]
+      register: _u_rc_kill
+      changed_when: _u_rc_kill.rc == 0
+      failed_when: false
+
+    - name: 刪 plist 與啟動腳本
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ _u_plist }}"
+        - "{{ _u_home }}/bin/claude-rc-server.sh"
+
+    - name: claude-rc —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['claude-rc'] }}"
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+      vars:
+        _d:
+          - path: "{{ claude_rc_log_dir }}/claude-rc.log"
+            what: Remote Control 的啟動紀錄
+          - path: "{{ claude_rc_log_dir }}/claude-rc.err.log"
+            what: Remote Control 的錯誤紀錄
+
+# ---- ~/.claude/CLAUDE.md 的 managed block -----------------------------------
+- name: ~/.claude/CLAUDE.md 的規矩
+  tags: [claude-md]
+  block:
+    - name: 拿掉 managed block（檔案其餘部分不動）
+      ansible.builtin.blockinfile:
+        path: "{{ _u_home }}/.claude/CLAUDE.md"
+        marker: "<!-- {mark} mac-bootstrap (managed) -->"
+        state: absent
+
+    - name: 讀剩下的內容
+      ansible.builtin.stat:
+        path: "{{ _u_home }}/.claude/CLAUDE.md"
+      register: _u_cmd
+
+    # 檔案是我們建的、拿掉 block 之後只剩空白 → 刪掉，回到沒有這個檔的狀態。
+    - name: 只剩空白就刪檔
+      ansible.builtin.file:
+        path: "{{ _u_home }}/.claude/CLAUDE.md"
+        state: absent
+      when: _u_cmd.stat.exists and _u_cmd.stat.size <= 1
+
+    - name: claude-md —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['claude-md'] }}"
+
+# ---- 到家就緒腳本 ------------------------------------------------------------
+- name: 到家就緒腳本
+  tags: [arrive-home]
+  block:
+    - name: 刪 ~/bin/arrive-home.sh
+      ansible.builtin.file:
+        path: "{{ _u_home }}/bin/arrive-home.sh"
+        state: absent
+
+    - name: arrive-home —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['arrive-home'] }}"
+
+# ---- 允許登入這台的公鑰 ------------------------------------------------------
+- name: 允許登入這台的公鑰
+  tags: [authorized-keys]
+  block:
+    - name: 讀 sshd 硬化設定
+      ansible.builtin.stat:
+        path: /etc/ssh/sshd_config.d/010-hardening.conf
+      register: _u_hardening
+
+    # 只收金鑰時拿掉公鑰 = 從別台再也登不進來（本機螢幕前還可以）。先移除 sshd 那項。
+    - name: 防呆：sshd 只收金鑰時不拿掉公鑰
+      ansible.builtin.assert:
+        that: not _u_hardening.stat.exists
+        fail_msg: >-
+          sshd 目前只收金鑰（010-hardening.conf 還在），拿掉公鑰就再也不能從別台登入。
+          要整個還原，先 make uninstall TAGS=sshd（會問密碼），再移除這項。
+        quiet: true
+
+    - name: 拿掉 config.yml 裡列的公鑰
+      ansible.posix.authorized_key:
+        user: "{{ ansible_facts.user_id }}"
+        key: "{{ item }}"
+        state: absent
+      loop: "{{ ssh_authorized_keys }}"
+      loop_control:
+        label: "{{ item.split(' ')[2] | default(item[:30]) }}"
+
+    - name: authorized-keys —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['authorized-keys'] }}"
+
+# ---- 對外用的 SSH key --------------------------------------------------------
+- name: 對外用的 SSH key
+  tags: [ssh-keys]
+  block:
+    - name: 拿掉 ~/.ssh/config 的 managed block
+      ansible.builtin.blockinfile:
+        path: "{{ _u_home }}/.ssh/config"
+        marker: "# {mark} mac-bootstrap ssh-keys (managed)"
+        state: absent
+
+    # 私鑰不自動刪，DATA=1 也不刪：公鑰可能還登記在 GitHub 上，刪了就再也無法用它，
+    # 而且刪錯沒有退路。要刪就先到 GitHub 拿掉公鑰，再自己刪檔。
+    - name: ssh-keys —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['ssh-keys'] }}"
+        _uninstall_keep: "{{ _uninstall_keep + _k }}"
+      vars:
+        _k: >-
+          {{ ssh_key_scopes | map('regex_replace', '^(.*)$',
+               _u_home ~ '/.ssh/id_ed25519_' ~ ssh_key_tag ~ '_\1')
+             | map('community.general.dict_kv', 'path')
+             | map('combine', {'what': '私鑰（先到 GitHub 等處拿掉公鑰，再自己刪；DATA=1 也不會動）'}) | list }}
+
+# ---- git 身分 ----------------------------------------------------------------
+- name: git 身分
+  tags: [git-identity]
+  block:
+    - name: 拿掉全域 user.name / user.email
+      community.general.git_config:
+        name: "{{ item }}"
+        scope: global
+        state: absent
+      loop: [user.name, user.email]
+
+    - name: git-identity —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['git-identity'] }}"
+
+# ---- podman ------------------------------------------------------------------
+- name: podman
+  tags: [podman]
+  block:
+    - name: podman 在不在
+      ansible.builtin.stat:
+        path: "{{ mac_node_brew_prefix }}/bin/podman"
+      register: _u_podman
+
+    # VM 開著的話先停（libkrun 的 krunkit 行程），否則 brew 移除後它還在背景跑。
+    - name: 停掉 podman machine
+      ansible.builtin.command:
+        argv: ["{{ mac_node_brew_prefix }}/bin/podman", machine, stop, "{{ podman_machine_name }}"]
+      register: _u_podman_stop
+      changed_when: _u_podman_stop.rc == 0 and 'stopped successfully' in (_u_podman_stop.stdout ~ _u_podman_stop.stderr)
+      failed_when: false
+      when: _u_podman.stat.exists
+
+    - name: brew uninstall podman
+      community.general.homebrew:
+        name: podman
+        state: absent
+
+    - name: podman —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['podman'] }}"
+        _uninstall_brew: true
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/.local/share/containers"
+            what: podman machine 的 VM 磁碟、映像檔、容器、volume（容器裡的資料也在這）
+          - path: "{{ _u_home }}/.config/containers"
+            what: podman 的設定與 machine 的定義
+          - path: "{{ _u_home }}/.ssh/{{ podman_machine_name }}"
+            what: podman machine 的 SSH 私鑰（podman 自己產生的）
+          - path: "{{ _u_home }}/.ssh/{{ podman_machine_name }}.pub"
+            what: podman machine 的 SSH 公鑰
+
+# ---- Rust（rustup）-----------------------------------------------------------
+# ~/.cargo 是「混住」的：rustup 的 proxy、cargo install 裝的二進位、你的設定和 token 都在裡面。
+# 同 Linux：~/.rustup 整包刪；~/.cargo 拆開刪。不用 `rustup self uninstall`（它會整個刪掉 ~/.cargo）。
+- name: Rust（rustup）
+  tags: [rust]
+  block:
+    - name: 找出 rustup 本體與它的 proxy（~/.cargo/bin 裡跟 rustup 是同一個檔的那些）
+      ansible.builtin.command:
+        argv: [/usr/bin/find, -L, "{{ _u_home }}/.cargo/bin", -maxdepth, "1", -samefile, "{{ _u_home }}/.cargo/bin/rustup"]
+      register: _u_rustup_owned
+      changed_when: false
+      failed_when: false
+
+    - name: 移除 rustup 與它的 proxy
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ _u_rustup_owned.stdout_lines }}"
+
+    - name: 移除 ~/.rustup（工具鏈本體）與 rustup 寫的 env 腳本
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ _u_home }}/.rustup"
+        - "{{ _u_home }}/.cargo/env"
+        - "{{ _u_home }}/.cargo/env.fish"
+        - "{{ _u_home }}/.cargo/env.nu"
+        - "{{ _u_home }}/.cargo/env.tcsh"
+
+    - name: Rust —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['rust'] }}"
+        _uninstall_rmdir: "{{ _uninstall_rmdir + [_u_home ~ '/.cargo'] }}"
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+        _uninstall_keep: "{{ _uninstall_keep + _k }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/.cargo/registry"
+            what: crates.io 的下載快取（純快取）
+          - path: "{{ _u_home }}/.cargo/git"
+            what: git 相依的快取（純快取）
+          - path: "{{ _u_home }}/.cargo/bin"
+            what: cargo install 裝的二進位（rustup 的 proxy 已經移掉，剩下的是你自己裝的）
+          - path: "{{ _u_home }}/.cargo/.crates.toml"
+            what: cargo install 的安裝紀錄
+          - path: "{{ _u_home }}/.cargo/.crates2.json"
+            what: cargo install 的安裝紀錄
+          - path: "{{ _u_home }}/.cargo/.package-cache"
+            what: cargo 的鎖檔
+        _k:
+          - path: "{{ _u_home }}/.cargo/config.toml"
+            what: 你的 cargo 設定 —— DATA=1 也不會動
+          - path: "{{ _u_home }}/.cargo/credentials.toml"
+            what: registry 的 token —— DATA=1 也不會動
+
+# ---- pnpm --------------------------------------------------------------------
+- name: pnpm
+  tags: [pnpm]
+  block:
+    - name: brew uninstall pnpm
+      community.general.homebrew:
+        name: pnpm
+        state: absent
+
+    - name: pnpm —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['pnpm'] }}"
+        _uninstall_brew: true
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/Library/pnpm"
+            what: pnpm 的 store 與全域安裝（含 devEngines 下載的 Node）
+          - path: "{{ _u_home }}/Library/Caches/pnpm"
+            what: pnpm 的下載快取
+          - path: "{{ _u_home }}/.local/state/pnpm"
+            what: pnpm 的狀態檔
+          - path: "{{ _u_home }}/Library/Preferences/pnpm"
+            what: pnpm 的全域設定（globalShims 在這裡）
+
+# ---- Node --------------------------------------------------------------------
+- name: Node
+  tags: [node]
+  block:
+    - name: 找所有版本目錄（node-<x.y.z>）
+      ansible.builtin.find:
+        paths: "{{ _u_home }}/.local"
+        patterns: '^node-\d+\.\d+\.\d+$'
+        use_regex: true
+        file_type: directory
+      register: _u_node_dirs
+
+    # npm、npx 和 npm i -g 裝的東西都在版本目錄裡，所以一起收掉。
+    - name: 移除 ~/.local/node 與所有版本目錄
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ [_u_home ~ '/.local/node'] + (_u_node_dirs.files | map(attribute='path') | list) }}"
+
+    - name: Node —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['node'] }}"
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/.npm"
+            what: npm 的下載快取
+
+# ---- Python（uv）-------------------------------------------------------------
+- name: Python（uv）
+  tags: [python]
+  block:
+    - name: brew uninstall uv
+      community.general.homebrew:
+        name: uv
+        state: absent
+
+    # `uv tool install` 的入口是 ~/.local/bin 裡指向 ~/.local/share/uv/tools 的 symlink。
+    # DATA=1 刪掉 tools 之後它們就是 dangling，一起清。
+    - name: 找 uv tool 的入口（DATA=1）
+      ansible.builtin.command:
+        argv: [/usr/bin/find, "{{ _u_home }}/.local/bin", -maxdepth, "1", -type, l, -lname, "{{ _u_home }}/.local/share/uv/*"]
+      register: _u_uv_links
+      changed_when: false
+      failed_when: false
+      when: mac_node_uninstall_data | bool
+
+    - name: 刪 uv tool 的入口（DATA=1）
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ _u_uv_links.stdout_lines | default([]) }}"
+      when: mac_node_uninstall_data | bool
+
+    - name: Python —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['python'] }}"
+        _uninstall_brew: true
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/.cache/uv"
+            what: uv 的下載與建置快取
+          - path: "{{ _u_home }}/.local/share/uv"
+            what: uv 下載的 Python（python/）與 uv tool 裝的工具（tools/）
+          - path: "{{ _u_home }}/.config/uv"
+            what: uv 的全域設定
+
+# ---- Go ----------------------------------------------------------------------
+- name: Go
+  tags: [go]
+  block:
+    - name: brew uninstall go
+      community.general.homebrew:
+        name: go
+        state: absent
+
+    # 模組快取是唯讀的（go 刻意的），不先打開寫入權限，刪 ~/go 會失敗。
+    - name: 打開模組快取的寫入權限（DATA=1）
+      ansible.builtin.command:
+        argv: [/bin/chmod, -R, u+w, "{{ _u_home }}/go"]
+      changed_when: false
+      failed_when: false
+      when: mac_node_uninstall_data | bool
+
+    - name: Go —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['go'] }}"
+        _uninstall_brew: true
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/go"
+            what: GOPATH —— 模組快取、GOTOOLCHAIN 下載的 toolchain、go install 裝的二進位（bin/）
+          - path: "{{ _u_home }}/Library/Caches/go-build"
+            what: Go 的 build cache（純快取）
+          - path: "{{ _u_home }}/Library/Application Support/go"
+            what: go env -w 寫的設定
+
+# ---- Claude Code CLI ---------------------------------------------------------
+- name: Claude Code CLI
+  tags: [claude]
+  block:
+    - name: 讀 claude-rc 的 plist
+      ansible.builtin.stat:
+        path: "{{ _u_plist }}"
+      register: _u_rc_plist
+
+    - name: 防呆：Remote Control 還裝著就不移除 claude
+      ansible.builtin.assert:
+        that: not _u_rc_plist.stat.exists
+        fail_msg: "Remote Control（claude-rc）還在用 claude。一起移除：make uninstall TAGS=claude-rc,claude"
+        quiet: true
+
+    # ~/.local/bin/claude 是 symlink，指向 ~/.local/share/claude/versions/<版本>。兩個都要刪：
+    # 只刪 symlink 會留下幾百 MB 沒人管；只刪 versions 會留下 dangling symlink。
+    - name: 移除 claude（入口與 versions/）
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ _u_home }}/.local/bin/claude"
+        - "{{ _u_home }}/.local/share/claude"
+
+    - name: claude —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['claude'] }}"
+        _uninstall_keep: "{{ _uninstall_keep + _k }}"
+      vars:
+        _k:
+          - path: "{{ _u_home }}/.claude"
+            what: 設定、對話紀錄、memory、CLAUDE.md —— 你的資料，DATA=1 也不會動（登入憑證在 Keychain）
+
+# ---- tmux --------------------------------------------------------------------
+- name: tmux
+  tags: [tmux]
+  block:
+    - name: 讀 claude-rc 的 plist
+      ansible.builtin.stat:
+        path: "{{ _u_plist }}"
+      register: _u_rc_plist2
+
+    - name: 防呆：Remote Control 還裝著就不移除 tmux
+      ansible.builtin.assert:
+        that: not _u_rc_plist2.stat.exists
+        fail_msg: "Remote Control（claude-rc）在 tmux 裡跑。一起移除：make uninstall TAGS=claude-rc,tmux"
+        quiet: true
+
+    - name: brew uninstall tmux
+      community.general.homebrew:
+        name: tmux
+        state: absent
+
+    - name: tmux —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['tmux'] }}"
+        _uninstall_brew: true
+
+# ---- PATH 環境設定（profile）--------------------------------------------------
+# 最後拆：拆完之後 ssh 'cmd' 與 LaunchAgent 都拿不到 brew 的指令。這次有 profile 時，
+# uninstall.yml 最後的「依現況重生」會跳過，不然又寫回去。
+- name: PATH 環境設定
+  tags: [profile]
+  block:
+    - name: 拿掉 ~/.zshenv 與 ~/.zprofile 的 managed block
+      ansible.builtin.blockinfile:
+        path: "{{ _u_home }}/{{ item }}"
+        marker: "# {mark} mac-bootstrap profile (managed)"
+        state: absent
+      loop: [.zshenv, .zprofile]
+
+    - name: 讀剩下的 rc 檔
+      ansible.builtin.stat:
+        path: "{{ _u_home }}/{{ item }}"
+      loop: [.zshenv, .zprofile]
+      register: _u_rc_files
+
+    # 這兩個檔原本不存在、是 profile 建的：拿掉 block 之後是空的就刪掉，回到原狀。
+    - name: 只剩空白的 rc 檔刪掉
+      ansible.builtin.file:
+        path: "{{ item.stat.path }}"
+        state: absent
+      loop: "{{ _u_rc_files.results | selectattr('stat.exists') | selectattr('stat.size', 'le', 1) | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: 刪 ~/.config/mac-bootstrap
+      ansible.builtin.file:
+        path: "{{ _u_home }}/.config/mac-bootstrap"
+        state: absent
+
+    - name: profile —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['profile'] }}"
+
+# ---- brew 的相依 --------------------------------------------------------------
+# 只帶走「當初是當相依裝進來、現在沒有人需要」的套件（例如 podman 的 krunkit）。
+- name: brew autoremove
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew }}", autoremove]
+  register: _u_autoremove
+  changed_when: "'Uninstalling' in _u_autoremove.stdout"
+  when: _uninstall_brew | bool
+  tags: always
+
+# ---- 資料目錄的統一處置（同 dev-env-ansible）-----------------------------------
+# 到這裡工具已經移除完畢。剩下的是「資料」：預設只報告，DATA=1 才真的刪。
+- name: 檢查資料目錄還在不在
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  register: _data_probe
+  loop: "{{ _uninstall_data + _uninstall_keep }}"
+  loop_control:
+    label: "{{ item.path }}"
+  tags: always
+
+# 只量會留下來的。DATA=1 時 _uninstall_keep（~/.claude 等）仍然留著，仍然報大小。
+- name: 量會保留的資料目錄有多大
+  ansible.builtin.command:
+    argv: [/usr/bin/du, -sh, "{{ item.item.path }}"]
+  register: _data_size
+  changed_when: false
+  failed_when: false
+  when:
+    - item.stat.exists
+    - not ((mac_node_uninstall_data | bool)
+           and item.item.path in (_uninstall_data | map(attribute='path') | list))
+  loop: "{{ _data_probe.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  tags: always
+
+# `| bool` 不能省：DATA=1 走 `-e mac_node_uninstall_data=true`，extra-var 進來是字串。
+- name: 移除資料目錄（DATA=1）
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _uninstall_data }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: mac_node_uninstall_data | bool
+  tags: always
+
+# rmdir 只刪空目錄：裡面還有你的東西（例如 ~/.cargo/config.toml）就留著。
+- name: 空了的目錄刪掉
+  ansible.builtin.command:
+    argv: [/bin/rmdir, "{{ item }}"]
+  register: _u_rmdir
+  changed_when: _u_rmdir.rc == 0
+  failed_when: false
+  loop: "{{ _uninstall_rmdir }}"
+  tags: always
+
+# 只 loop `_data_size.results`：被 when 跳過的元素沒有 stdout，不能另外 selectattr 去撈；
+# 「保留」只列真的量過的（有 stdout 的），DATA=1 刪掉的那些在上面「已刪除」列過了。
+- name: 移除完成
+  ansible.builtin.debug:
+    msg: |-
+      已移除：{{ _uninstall_done | join('、') if _uninstall_done else '（user 層這次沒有選到任何項目）' }}
+      {% if _uninstall_done %}
+      PATH（~/.config/mac-bootstrap/env.zsh）已依移除後的現況重新產生；新開的 shell 才生效。
+      {% endif %}
+      {% set rm_paths = _uninstall_data | map(attribute='path') | list %}
+      {% set shown = _data_size.results | selectattr('item.stat.exists') | selectattr('stdout', 'defined') | list %}
+      {% set deleted = (_data_probe.results | selectattr('stat.exists') | selectattr('item.path', 'in', rm_paths) | list)
+                       if (mac_node_uninstall_data | bool) else [] %}
+      {% if shown or deleted %}
+
+      資料：
+      {% for p in deleted %}
+        已刪除        {{ p.item.path }}
+      {% endfor %}
+      {% for r in shown %}
+        保留  {{ (r.stdout | default('? ')).split()[0].rjust(6) }}  {{ r.item.item.path }}
+                {{ r.item.item.what }}
+      {% endfor %}
+      {% if not (mac_node_uninstall_data | bool) and (shown | selectattr('item.item.path', 'in', rm_paths) | list) %}
+
+      要連上面「保留」而且不是你自己資料的那些一起清：同一個指令加 DATA=1。
+      {% endif %}
+      {% endif %}
+
+      注意：config 沒有「這台不該有什麼」的紀錄，**下一次不帶 TAGS 的 make install 會把剛移除的
+      裝回來**。只想重灌單項就 make install TAGS=<項目>。
+  tags: always

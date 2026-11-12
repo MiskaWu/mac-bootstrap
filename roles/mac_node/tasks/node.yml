@@ -1,0 +1,111 @@
+---
+# Node：官方 tarball，對 SHASUMS256.txt 驗證後放到 ~/.local/node-<版本>，再用 ~/.local/node
+# symlink 指過去（research §2）。不用 brew 的 node（追最新 major、19 個相依），也不用官方 .pkg
+# （寫進 /usr/local、沒有官方移除程序）。npm i -g 裝的東西也在 ~/.local/node-<版本> 裡，
+# 換版本時跟著舊目錄一起清掉 —— 全域套件不該在主機上累積。
+#
+# 專案要別的 Node 版本：交給 pnpm 的 devEngines.runtime（TAGS=pnpm），再不行就進容器。
+- name: Node {{ node_version }} 裝了沒
+  ansible.builtin.stat:
+    path: "{{ mac_node_home }}/.local/node-{{ node_version }}/bin/node"
+  register: _node_bin
+  check_mode: false
+
+- name: 乾跑：會下載 Node {{ node_version }}
+  ansible.builtin.debug:
+    msg: "會下載 node-v{{ node_version }}-darwin-arm64.tar.xz 並放到 ~/.local/node-{{ node_version }}"
+  changed_when: true
+  when: ansible_check_mode and not _node_bin.stat.exists
+
+# --check 時 tempfile 不會給路徑，整段跳過（上面那則代替它報告）。
+- name: 下載並放好 Node {{ node_version }}
+  when: not _node_bin.stat.exists and not ansible_check_mode
+  block:
+    - name: 暫存目錄
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: -mac-bootstrap-node
+      register: _node_tmp
+
+    - name: 下載官方 tarball（對 SHASUMS256.txt 驗證）
+      ansible.builtin.get_url:
+        url: "{{ node_dist_url }}/node-v{{ node_version }}-darwin-arm64.tar.xz"
+        dest: "{{ _node_tmp.path }}/node.tar.xz"
+        checksum: "sha256:{{ node_dist_url }}/SHASUMS256.txt"
+        mode: "0644"
+
+    - name: 解壓目錄
+      ansible.builtin.file:
+        path: "{{ _node_tmp.path }}/x"
+        state: directory
+        mode: "0755"
+
+    # 不用 unarchive：它在 macOS 上要 GNU tar。系統的 bsdtar 支援 --strip-components。
+    - name: 解開
+      ansible.builtin.command:
+        argv: [/usr/bin/tar, -xJf, "{{ _node_tmp.path }}/node.tar.xz", -C, "{{ _node_tmp.path }}/x", --strip-components, "1"]
+      changed_when: true
+
+    - name: ~/.local
+      ansible.builtin.file:
+        path: "{{ mac_node_home }}/.local"
+        state: directory
+        mode: "0755"
+
+    # 先解到暫存再整包搬過去：中途失敗不會留下半套的 ~/.local/node-<版本>。
+    - name: 清掉上次沒完成的目錄
+      ansible.builtin.file:
+        path: "{{ mac_node_home }}/.local/node-{{ node_version }}"
+        state: absent
+
+    - name: 搬到 ~/.local/node-{{ node_version }}
+      ansible.builtin.command:
+        argv: [/bin/mv, "{{ _node_tmp.path }}/x", "{{ mac_node_home }}/.local/node-{{ node_version }}"]
+      changed_when: true
+
+  always:
+    - name: 清掉暫存
+      ansible.builtin.file:
+        path: "{{ _node_tmp.path }}"
+        state: absent
+      when: _node_tmp.path is defined
+
+- name: ~/.local/node → node-{{ node_version }}
+  ansible.builtin.file:
+    src: "node-{{ node_version }}"
+    dest: "{{ mac_node_home }}/.local/node"
+    state: link
+    force: true
+
+# 只認「node-<x.y.z>」這種名字，免得誤刪 ~/.local 裡別的東西。
+- name: 找舊版本
+  ansible.builtin.find:
+    paths: "{{ mac_node_home }}/.local"
+    patterns: '^node-\d+\.\d+\.\d+$'
+    use_regex: true
+    file_type: directory
+  register: _node_dirs
+  check_mode: false
+
+- name: 刪舊版本（連同它裡面 npm i -g 裝的）
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _node_dirs.files | rejectattr('path', 'equalto', mac_node_home ~ '/.local/node-' ~ node_version) | list }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: 讀 node -v
+  ansible.builtin.command:
+    argv: ["{{ mac_node_home }}/.local/node/bin/node", -v]
+  register: _node_v
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: node -v 要等於 pin 的版本
+  ansible.builtin.assert:
+    that: _node_v.stdout == 'v' ~ node_version
+    fail_msg: "node -v = {{ _node_v.stdout }}，應為 v{{ node_version }}"
+    quiet: true
+  when: not ansible_check_mode

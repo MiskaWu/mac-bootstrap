@@ -1,0 +1,27 @@
+---
+# pnpm：brew 版（Rust 原生執行檔，不需要 Node、沒有相依）。Node 生態系裡唯一「專案宣告、
+# 工具自動抓」的機制：devEngines.runtime 加 onFail: "download"，pnpm 照宣告下載專案要的 Node，
+# 版本和 checksum 寫進 lockfile（research §2）。不裝 corepack：Node 25 起不再隨附。
+- name: pnpm（brew）
+  community.general.homebrew:
+    name: pnpm
+    state: latest
+
+# globalShims 關掉：見 defaults 的 pnpm_global_shims。用 pnpm 自己的指令讀寫，
+# 不直接寫設定檔 —— 檔案的位置和格式是 pnpm 的事，換版本時不會跟著漂移。
+- name: 讀 globalShims
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/pnpm", config, get, globalShims, --location, global]
+  register: _pnpm_shims
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: 設定 globalShims
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/pnpm", config, set, globalShims, "{{ pnpm_global_shims | string | lower }}", --location, global]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _pnpm_shims.stdout | trim != (pnpm_global_shims | string | lower)

@@ -1,0 +1,23 @@
+---
+# Go：brew 版只當 bootstrap。專案要的版本寫在 go.mod 的 toolchain，預設的 GOTOOLCHAIN=auto
+# 會自動下載並改用（只往上切，不往下）。brew 版不改 go.env，所以 auto 照樣生效（research §2）。
+# state: latest = 每次 install 都跟到最新，對應 Linux 的 go_version: latest。
+- name: go（brew）
+  community.general.homebrew:
+    name: go
+    state: latest
+
+- name: 讀 GOTOOLCHAIN
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/go", env, GOTOOLCHAIN]
+  register: _go_toolchain
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: GOTOOLCHAIN 必須是 auto（不是的話，專案的 toolchain 宣告不會生效）
+  ansible.builtin.assert:
+    that: _go_toolchain.stdout == 'auto'
+    fail_msg: "go env GOTOOLCHAIN = {{ _go_toolchain.stdout }}（應為 auto）。檢查 ~/Library/Application Support/go/env 或環境變數"
+    quiet: true
+  when: not ansible_check_mode

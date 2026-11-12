@@ -1,0 +1,16 @@
+---
+# ~/.claude/CLAUDE.md 裡的一個 managed block：這台機器上每個 Claude 工作階段（包括從手機
+# 經 Remote Control 開的）都會讀到的規矩。只管這一塊，檔案其餘部分是 Miska 自己的。
+# 只確保存在、不管權限：~/.claude 是 Claude Code 自己的目錄，權限由它決定。
+- name: ~/.claude
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.claude"
+    state: directory
+
+- name: ~/.claude/CLAUDE.md 的 managed block
+  ansible.builtin.blockinfile:
+    path: "{{ mac_node_home }}/.claude/CLAUDE.md"
+    create: true
+    mode: "0644"
+    marker: "<!-- {mark} mac-bootstrap (managed) -->"
+    block: "{{ lookup('ansible.builtin.template', 'claude-md.j2') }}"

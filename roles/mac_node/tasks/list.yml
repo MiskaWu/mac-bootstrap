@@ -13,6 +13,13 @@
     - { tag: ssh-keys,        path: "{{ mac_node_home }}/.ssh/id_ed25519_{{ ssh_key_tag }}_{{ ssh_key_scopes | first | default('github') }}", desc: "對外用的 SSH key 與 ~/.ssh/config" }
     - { tag: authorized-keys, path: "{{ mac_node_home }}/.ssh/authorized_keys",                                  desc: "允許登入這台的公鑰" }
     - { tag: arrive-home,     path: "{{ mac_node_home }}/bin/arrive-home.sh",                                    desc: "到家就緒腳本" }
+    - { tag: go,              path: "{{ mac_node_brew_prefix }}/bin/go",                                         desc: "Go（brew；專案版本由 go.mod 的 toolchain 宣告）" }
+    - { tag: python,          path: "{{ mac_node_brew_prefix }}/bin/uv",                                         desc: "uv（brew；主機不裝 Python，一律 uv run）" }
+    - { tag: node,            path: "{{ mac_node_home }}/.local/node-{{ node_version }}/bin/node",               desc: "Node {{ node_version }}（官方 tarball → ~/.local/node）" }
+    - { tag: pnpm,            path: "{{ mac_node_brew_prefix }}/bin/pnpm",                                       desc: "pnpm（brew；globalShims 關）" }
+    - { tag: rust,            path: "{{ mac_node_home }}/.cargo/bin/rustup",                                     desc: "Rust（官方 rustup，~/.rustup、~/.cargo）" }
+    - { tag: podman,          path: "{{ mac_node_brew_prefix }}/bin/podman",                                     desc: "podman（brew；machine 只建不啟動）" }
+    - { tag: claude-md,       path: "{{ mac_node_home }}/.claude/CLAUDE.md",                                     desc: "~/.claude/CLAUDE.md 裡這台的規矩（managed block）" }
     - { tag: profile,         path: "{{ mac_node_home }}/.config/mac-bootstrap/env.zsh",                         desc: "PATH（~/.zshenv 與 ~/.zprofile 各 source 一次）" }
     - { tag: claude-rc,       path: "{{ mac_node_home }}/Library/LaunchAgents/{{ claude_rc_label }}.plist",     desc: "Remote Control 常駐伺服器（LaunchAgent + tmux）" }
     - { tag: hostname,        path: /dev/null,                                                                    desc: "主機名稱（sudo；設定類，看 make verify）" }

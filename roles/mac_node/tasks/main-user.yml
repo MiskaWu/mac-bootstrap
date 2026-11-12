@@ -51,12 +51,42 @@
   ansible.builtin.import_tasks: arrive-home.yml
   tags: [user, arrive-home]
 
+# ---- 語言與容器（research/language-versions.md）-----------------------------
+# 每一項都有 make uninstall（uninstall.yml）。這裡加一項，那邊也要加。
+- name: Go（brew）
+  ansible.builtin.import_tasks: go.yml
+  tags: [user, go]
+
+- name: Python（uv，brew；主機不裝 Python）
+  ansible.builtin.import_tasks: python.yml
+  tags: [user, python]
+
+- name: Node（官方 tarball，pin 版本）
+  ansible.builtin.import_tasks: node.yml
+  tags: [user, node]
+
+- name: pnpm（brew）
+  ansible.builtin.import_tasks: pnpm.yml
+  tags: [user, pnpm]
+
+- name: Rust（官方 rustup）
+  ansible.builtin.import_tasks: rust.yml
+  tags: [user, rust]
+
+- name: podman（brew，machine 只建不啟動）
+  ansible.builtin.import_tasks: podman.yml
+  tags: [user, podman]
+
+- name: ~/.claude/CLAUDE.md 的規矩
+  ansible.builtin.import_tasks: claude-md.yml
+  tags: [user, claude-md]
+
 # ---- 收尾 -------------------------------------------------------------------
 # profile 放在 claude-rc 前面：伺服器啟動時 PATH 必須已經對。
 # 內容看機器上實際有什麼（stat），不看開關。
 - name: PATH 環境設定（~/.zshenv + ~/.zprofile）
   ansible.builtin.import_tasks: profile.yml
-  tags: [user, profile, tmux, claude, claude-rc]
+  tags: [user, profile, tmux, claude, claude-rc, go, python, node, pnpm, rust, podman]
 
 - name: Remote Control 常駐伺服器
   ansible.builtin.import_tasks: claude-rc.yml

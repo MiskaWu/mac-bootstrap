@@ -1,0 +1,11 @@
+---
+# Python：主機層**不裝** Python，只裝 uv（brew）。專案用 .python-version / requires-python 宣告，
+# `uv run` / `uv sync` 自動下載 python-build-standalone 到 ~/.local/share/uv/python。
+#
+# env.zsh 會設 UV_PYTHON_INSTALL_BIN=0：uv 不在 ~/.local/bin 放 python3.X 連結，主機 PATH 上
+# 就沒有任何 uv 的 Python，大家只能 `uv run`（research §7-7，Miska 核准）。代價是 `python3`
+# 落到 CLT 的 3.9.6 —— 這件事寫在 ~/.claude/CLAUDE.md（TAGS=claude-md）。
+- name: uv（brew）
+  community.general.homebrew:
+    name: uv
+    state: latest

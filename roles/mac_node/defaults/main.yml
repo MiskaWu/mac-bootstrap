@@ -45,6 +45,32 @@ mac_node_ssh_scope_hosts:
   gitlab: gitlab.com
   bitbucket: bitbucket.org
 
+# ---- 語言與容器（research/language-versions.md，Miska 2026-11-12 核准）------------
+# 不裝通用版本管理器。專案要的版本由專案自己宣告，交給語言自己的機制下載：
+# go.mod 的 toolchain（GOTOOLCHAIN=auto）、uv 的 .python-version、pnpm 的 devEngines.runtime、
+# rust-toolchain.toml。主機只放「bootstrap 用的那一份」。
+#
+# Node：官方 tarball，明確 pin（不支援 latest）。改版本號再 make install TAGS=node，
+# ~/.local/node 會切過去，舊版本目錄（連同裡面 npm i -g 裝的）會被清掉。
+node_version: "26.13.1"
+node_dist_url: "https://nodejs.org/dist/v{{ node_version }}"
+# pnpm：關掉 globalShims。不關的話，遠端工作階段可以透過 pnpm 全域裝 Node，
+# pnpm 就悄悄變成 Node 的版本管理器（research §7-3）。
+pnpm_global_shims: false
+# Rust：官方 rustup-init 的參數，同 Linux。--no-modify-path 一定要（rustup 預設會建 ~/.zshenv）。
+rust_profile: minimal
+rust_components: [rustfmt, clippy]
+# podman machine：只建不啟動，用到時才 `podman machine start`（Miska 核准：不開機自動啟動）。
+# 配額：64 GB 的機器，給 VM 8 GB。記憶體單位 MiB、磁碟 GiB。
+podman_machine_name: podman-machine-default
+podman_machine_cpus: 4
+podman_machine_memory: 8192
+podman_machine_disk: 100
+
+# ---- 移除（make uninstall）---------------------------------------------------
+# DATA=1 → -e mac_node_uninstall_data=true：連快取、下載的 runtime、VM 磁碟一起刪。
+mac_node_uninstall_data: false
+
 # ---- 到家就緒 ----------------------------------------------------------------
 arrive_home_apps: []
 arrive_home_urls: []
@@ -53,5 +79,5 @@ arrive_home_urls: []
 # brew 上「允許存在」的頂層套件。多出來的 make verify 會列出來（只報告，不移除）。
 # 來源：make 由 bootstrap.sh 裝、ansible 由 Makefile 裝、其餘由各自的 task 檔裝。
 # 加一個 brew 套件的 task 時，回來這裡補一行。
-mac_node_brew_allowed_formulae: [make, ansible, tmux]
+mac_node_brew_allowed_formulae: [make, ansible, tmux, go, uv, pnpm, podman]
 mac_node_brew_allowed_casks: ["{{ mac_node_tailscale_cask }}"]

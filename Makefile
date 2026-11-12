@@ -19,6 +19,11 @@ MAKEFLAGS += --no-builtin-rules
 # （同 dev-env-ansible 踩過的坑），註解一律另起一行。
 INVENTORY ?= inventory/hosts.yml
 PLAYBOOK  ?= site.yml
+# make uninstall 的入口（獨立的 playbook，理由見它的檔頭）
+UNPLAYBOOK ?= uninstall.yml
+# DATA=1：只給 make uninstall 用 —— 連資料（模組快取、uv 下載的 Python、podman 的 VM 磁碟…）
+# 一起刪。不給就只移除工具，資料留著並報告大小。你的東西（~/.claude、私鑰）DATA=1 也不動。
+DATA      ?=
 # 機器專屬的值（gitignored）。範本是 config.example.yml。
 CONFIG    ?= config.yml
 # TAGS：要做什麼就寫在這裡，例 `make install TAGS=claude-rc`、`TAGS=tmux,profile`。
@@ -44,12 +49,16 @@ _ARGS  := $(_CONN) $(_CFG) $(_TAGS) $(_LIMIT) $(EXTRA)
 
 # 直接跟 playbook 要真實的 tag 清單（單一事實來源）。濾掉 never / always。
 # BSD paste 一定要給檔名，stdin 要寫 `-`。
-_TAGS_OF_PLAYBOOK = ansible-playbook $(PLAYBOOK) $(_CONN) --list-tags \
+# 用法：$(call _TAGS_OF,<playbook>)。site.yml 與 uninstall.yml 各有一份 tag 清單。
+_TAGS_OF = ansible-playbook $(1) $(_CONN) --list-tags \
 	| sed -n 's/.*TASK TAGS: \[\(.*\)\]/\1/p' \
 	| tr -d ' ' | tr ',' '\n' | grep -vxE 'never|always' | sort -u | paste -sd' ' -
+_TAGS_OF_PLAYBOOK  = $(call _TAGS_OF,$(PLAYBOOK))
+_TAGS_OF_UNINSTALL = $(call _TAGS_OF,$(UNPLAYBOOK))
 
-# 要 sudo 的 tag：system 那個 play 的 TASK TAGS（play 名字以 "mac_node system" 開頭，見 site.yml）。
-_SYSTEM_TAGS_OF = ansible-playbook $(PLAYBOOK) $(_CONN) --list-tags \
+# 要 sudo 的 tag：system 那個 play 的 TASK TAGS（play 名字以 "mac_node system" 開頭，
+# site.yml 與 uninstall.yml 都是）。用法：$(call _SYSTEM_TAGS_OF,<playbook>)。
+_SYSTEM_TAGS_OF = ansible-playbook $(1) $(_CONN) --list-tags \
 	| awk '/play \#[0-9]+ \([^)]*\): mac_node system/ {f=1; next} \
 	       f && /TASK TAGS:/ {sub(/.*TASK TAGS: \[/, ""); sub(/\].*/, ""); gsub(/ /, ""); gsub(/,/, " "); print; exit}'
 
@@ -58,16 +67,17 @@ _SYSTEM_TAGS_OF = ansible-playbook $(PLAYBOOK) $(_CONN) --list-tags \
 #
 # **這裡不能用 case**：macOS 的 bash 3.2 解析 $( ) 裡的 case 時，會把 pattern 後面的 `)`
 # 當成 $( 的結尾，直接 syntax error（實測）。改用 [[ == ]]。
+# 用法：$$($(call _BECOME_FLAG,<playbook>))。
 define _BECOME_FLAG
 if [ -z "$(TAGS)" ]; then echo -K; exit 0; fi
-sys=" $$($(_SYSTEM_TAGS_OF)) "
+sys=" $$($(call _SYSTEM_TAGS_OF,$(1))) "
 for t in $$(echo '$(TAGS)' | tr ',' ' '); do
 	if [[ "$$sys" == *" $$t "* ]]; then echo -K; exit 0; fi
 done
 endef
 
-.PHONY: help init list check install facts verify syntax lint \
-	_ensure-ansible _ensure-config _check-tags
+.PHONY: help init list check install uninstall facts verify syntax lint \
+	_ensure-ansible _ensure-config _check-tags _check-uninstall-tags
 
 help: ## 顯示所有可用命令
 	@awk 'BEGIN {FS = ":.*##"; printf "\n使用方式:\n  make \033[36m<target>\033[0m\n"} \
@@ -106,9 +116,20 @@ init: _ensure-ansible ## 起手：補上 ansible，並印出下一步
 # 不帶 TAGS = 不帶 --tags = 全部（含 system 層，會問密碼）。
 # 先把 -K 算好再印一行乾淨的指令：直接寫在參數裡，make 會把整段判斷腳本一起印出來。
 install: _ensure-ansible _ensure-config _check-tags ## 套用：不帶 TAGS 全部，或 TAGS=claude-rc / TAGS=user
-	@become=$$($(call _BECOME_FLAG))
+	@become=$$($(call _BECOME_FLAG,$(PLAYBOOK)))
 	echo "+ ansible-playbook $(PLAYBOOK) $(_ARGS) $$become"
 	ansible-playbook $(PLAYBOOK) $(_ARGS) $$become
+
+##@ 移除
+# 必須帶 TAGS（不帶就拒絕，沒有「全砍」）。同 dev-env-ansible：獨立的 uninstall.yml、
+# 工具與資料分開（DATA=1 才刪資料）、沒有乾跑（理由見 roles/mac_node/tasks/uninstall-user.yml）。
+# 碰到 system 層的 tag（sshd / power / softwareupdate）會問 sudo 密碼。
+uninstall: _ensure-ansible _ensure-config _check-uninstall-tags ## 移除：必須帶 TAGS，例 TAGS=go；加 DATA=1 連資料一起清
+	@become=$$($(call _BECOME_FLAG,$(UNPLAYBOOK)))
+	data="$(if $(filter 1,$(DATA)),-e mac_node_uninstall_data=true,)"
+	echo "+ ansible-playbook $(UNPLAYBOOK) $(_ARGS) $$data $$become"
+	# yaml：最後那則報告是多行的（保留了哪些資料、各多大），JSON 會壓成一行 \n。
+	ANSIBLE_CALLBACK_RESULT_FORMAT=yaml ansible-playbook $(UNPLAYBOOK) $(_ARGS) $$data $$become
 
 ##@ 先看再動
 # list   —— 有哪些項目、這台已經有哪些（唯讀）
@@ -121,11 +142,13 @@ list: _ensure-ansible ## 有哪些項目、已經有哪些、可用的 tag（唯
 	echo "可用的 tag（直接跟 playbook 要的，不是手抄）："
 	echo "    $$($(_TAGS_OF_PLAYBOOK))"
 	echo "要 sudo 的（TAGS 碰到這些會問密碼）："
-	echo "    $$($(_SYSTEM_TAGS_OF))"
+	echo "    $$($(call _SYSTEM_TAGS_OF,$(PLAYBOOK)))"
+	echo "可以 make uninstall 的："
+	echo "    $$($(_TAGS_OF_UNINSTALL))"
 	echo
 
 check: _ensure-ansible _ensure-config _check-tags ## 乾跑預覽（--check --diff）；同樣吃 TAGS=
-	@become=$$($(call _BECOME_FLAG))
+	@become=$$($(call _BECOME_FLAG,$(PLAYBOOK)))
 	echo "+ ansible-playbook $(PLAYBOOK) $(_ARGS) --check --diff $$become"
 	ansible-playbook $(PLAYBOOK) $(_ARGS) --check --diff $$become
 
@@ -160,6 +183,43 @@ _check-tags: _ensure-ansible
 	if [ -n "$$bad" ]; then
 		echo "Error: playbook 裡沒有這些 tag：$$bad" >&2
 		echo "可用：$$known" >&2
+		exit 1
+	fi
+
+# uninstall 的 guard（同 dev-env-ansible）。比 _check-tags 多兩件事：
+#   1. **TAGS 空的就拒絕**。不帶 TAGS 絕不能退化成「全砍」，也不能靜默什麼都不做。
+#   2. site.yml 有、uninstall.yml 沒有的 tag，印出**為什麼要手動、手動怎麼做**，
+#      而不是籠統的「沒有這個 tag」。
+#   user / system 這兩個整層的 tag 不在 uninstall.yml 裡 —— 刻意的，理由同 1。
+_check-uninstall-tags: _ensure-ansible
+	@if [ -z "$(TAGS)" ]; then
+		echo "Error: make uninstall 必須點名要移除什麼，例：" >&2
+		echo "    make uninstall TAGS=go" >&2
+		echo "    make uninstall TAGS=go,node DATA=1" >&2
+		echo >&2
+		echo "install 不帶 TAGS 是「全裝」，uninstall 不帶 TAGS 一律拒絕 —— 沒有「全砍」這個意思。" >&2
+		exit 1
+	fi
+	known="$$($(_TAGS_OF_UNINSTALL))"
+	bad=""
+	for t in $$(echo '$(TAGS)' | tr ',' ' '); do
+		[[ " $$known " == *" $$t "* ]] && continue
+		case "$$t" in
+			tailscale)
+				echo "tailscale 沒有自動移除：它的 cask 是 .pkg，移除要 sudo，而 brew 不能用 root 跑。手動：" >&2
+				echo "    先在選單列的 Tailscale 登出，再 brew uninstall --cask tailscale-app（會問密碼）" >&2 ;;
+			hostname)
+				echo "hostname 沒有「移除」：名字是宣告式的設定。要改回原名就改 config.yml 的" >&2
+				echo "    mac_computer_name / mac_host_name，再 make install TAGS=hostname（原名記在 SETUP-LOG）" >&2 ;;
+			user|system)
+				echo "$$t 是整層的 tag，uninstall 不接受（沒有「全砍」）。請逐項點名，make list 看有哪些。" >&2 ;;
+			*)
+				echo "uninstall.yml 裡沒有這個 tag：$$t" >&2 ;;
+		esac
+		bad="$$bad $$t"
+	done
+	if [ -n "$$bad" ]; then
+		echo "可以 make uninstall 的：$$known" >&2
 		exit 1
 	fi
 

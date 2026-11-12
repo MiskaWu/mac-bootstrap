@@ -176,6 +176,14 @@
         want="make brew"
         [ -x {{ mac_node_claude_bin | quote }} ] && want="$want claude"
         [ -x {{ mac_node_tmux_bin | quote }} ] && want="$want tmux"
+        # 語言工具：裝了才要求（偵測式，同 profile）
+        b={{ mac_node_brew_prefix | quote }}/bin
+        [ -x "$b/go" ] && want="$want go"
+        [ -x "$b/uv" ] && want="$want uv"
+        [ -x "$b/pnpm" ] && want="$want pnpm"
+        [ -x "$b/podman" ] && want="$want podman"
+        [ -x "$HOME/.local/node/bin/node" ] && want="$want node npm"
+        [ -x "$HOME/.cargo/bin/rustup" ] && want="$want cargo rustc"
         bad=""
         for mode in ssh launchd; do
           flag=""; [ $mode = launchd ] && flag="-l"
@@ -188,6 +196,54 @@
         done
         [ -z "$bad" ] || { echo "拿不到或拿錯：$bad"; exit 1; }
         echo "ssh 與 launchd 兩種情境都拿得到：$want"
+
+    # 語言工具的「規矩有沒有被破壞」。沒裝的項目回 0 並註明，不算失敗（裝不裝由 tag 決定）。
+    - name: "語言工具的版本與設定"
+      level: fail
+      cmd: |
+        b={{ mac_node_brew_prefix | quote }}/bin
+        out=""; bad=""
+        if [ -x "$b/go" ]; then
+          tc=$("$b/go" env GOTOOLCHAIN 2>/dev/null || true)
+          [ "$tc" = auto ] || bad="$bad GOTOOLCHAIN=${tc}（應為 auto）"
+          out="$out go $("$b/go" env GOVERSION 2>/dev/null)"
+        fi
+        if [ -x "$HOME/.local/node/bin/node" ]; then
+          v=$("$HOME/.local/node/bin/node" -v)
+          [ "$v" = "v{{ node_version }}" ] || bad="$bad node=${v}（pin 的是 v{{ node_version }}）"
+          out="$out node $v"
+        fi
+        if [ -x "$b/pnpm" ]; then
+          s=$("$b/pnpm" config get globalShims --location global 2>/dev/null || true)
+          [ "$s" = "{{ pnpm_global_shims | string | lower }}" ] || bad="$bad pnpm.globalShims=${s}"
+          out="$out pnpm $("$b/pnpm" --version)"
+        fi
+        if [ -x "$HOME/.cargo/bin/rustup" ]; then
+          d=$("$HOME/.cargo/bin/rustup" default 2>/dev/null || true)
+          [ -n "$d" ] || bad="$bad rust 沒有預設工具鏈"
+          out="$out rust ${d%% *}"
+        fi
+        if [ -x "$b/uv" ]; then
+          # UV_PYTHON_INSTALL_BIN=0 的效果：~/.local/bin 裡不該有 uv 的 python3.X 連結
+          links=$(/usr/bin/find "$HOME/.local/bin" -maxdepth 1 -name 'python3*' 2>/dev/null | wc -l | tr -d ' ')
+          [ "$links" = 0 ] || bad="$bad ~/.local/bin 裡有 ${links} 個 python3* 連結"
+          out="$out uv $("$b/uv" --version | awk '{print $2}')"
+        fi
+        if [ -x "$b/podman" ]; then
+          "$b/podman" machine inspect {{ podman_machine_name | quote }} >/dev/null 2>&1 || bad="$bad podman machine 不在（make install TAGS=podman）"
+          st=$("$b/podman" machine inspect {{ podman_machine_name | quote }} 2>/dev/null | /usr/bin/grep -o '"State": *"[a-z]*"' | /usr/bin/grep -o '[a-z]*"$' | tr -d '"')
+          out="$out podman machine=${st:-?}"
+        fi
+        [ -z "$bad" ] || { echo "不對：$bad"; exit 1; }
+        [ -n "$out" ] || { echo "沒有裝任何語言工具"; exit 0; }
+        echo "${out# }"
+
+    - name: "~/.claude/CLAUDE.md 有這台的規矩"
+      level: warn
+      cmd: |
+        f="$HOME/.claude/CLAUDE.md"
+        /usr/bin/grep -q 'BEGIN mac-bootstrap (managed)' "$f" 2>/dev/null || { echo "沒有（make install TAGS=claude-md）"; exit 1; }
+        echo "有"
 
     - name: "全域 git 身分"
       level: fail

@@ -23,6 +23,15 @@ mac_host_name: "MacBook-Pro"
 #       帶出門前必須改回 A 並重跑 TAGS=power。
 mac_lid_mode: A
 
+# make uninstall TAGS=power 要還原成的值：這台「設定前」的 pmset -c（先 pmset -g custom 記下來）。
+# 沒填的話 uninstall power 會拒絕執行（不知道要還原成什麼）。
+# mac_node_pmset_ac_original:
+#   sleep: 1
+#   disksleep: 10
+#   displaysleep: 10
+#   womp: 1
+#   tcpkeepalive: 1
+
 # ---- git 身分（TAGS=git-identity）------------------------------------------
 git_user_name: "Your Name"
 git_user_email: "you@example.com"

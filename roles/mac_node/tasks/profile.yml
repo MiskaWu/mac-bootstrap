@@ -23,12 +23,35 @@
     - "{{ mac_node_brew }}"
     - "{{ mac_node_brew_prefix }}/opt/make/libexec/gnubin"
     - "{{ mac_node_home }}/.local/bin"
+    - "{{ mac_node_brew_prefix }}/bin/go"
+    - "{{ mac_node_brew_prefix }}/bin/uv"
+    - "{{ mac_node_brew_prefix }}/bin/podman"
+    - "{{ mac_node_home }}/.local/node/bin"
+    - "{{ mac_node_home }}/.cargo/bin"
   register: _profile_paths
   check_mode: false
 
 - name: 整理偵測結果
   ansible.builtin.set_fact:
     _have: "{{ dict(_profile_paths.results | map(attribute='item') | zip(_profile_paths.results | map(attribute='stat.exists'))) }}"
+
+# DOCKER_HOST 要寫成靜態的路徑（env.zsh 不准開子程序），所以在這裡先問 podman。
+# socket 在 $TMPDIR 底下，每個使用者固定。machine 還沒建就不設。
+- name: podman machine 的 API socket
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/podman", machine, inspect, "{{ podman_machine_name }}"]
+  register: _podman_inspect
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: _have[mac_node_brew_prefix ~ '/bin/podman']
+
+- name: 取出 socket 路徑（沒有 machine 就是空字串）
+  ansible.builtin.set_fact:
+    _podman_socket: >-
+      {%- if (_podman_inspect.rc | default(1)) == 0 -%}
+      {{- ((((_podman_inspect.stdout | from_json)[0] | default({})).get('ConnectionInfo') or {}).get('PodmanSocket') or {}).get('Path', '') -}}
+      {%- endif -%}
 
 - name: ~/.config/mac-bootstrap 目錄
   ansible.builtin.file:
