@@ -46,7 +46,9 @@ ssh_authorized_keys: []
 ssh_authorized_keys_revoked: []
 
 # ---- Remote Control（TAGS=claude-rc）---------------------------------------
-# 手機 / claude.ai/code 上看到的名字。
+# 啟動時預先開好的那個工作階段的名字（`claude remote-control --name`）。
+# **不是裝置名稱**：手機「裝置」那欄顯示的是主機名稱（`hostname`，這裡由 mac_host_name 決定），
+# Remote Control 沒有選項可以改；要換只能改主機名稱。
 claude_rc_name: home-mac
 # 根目錄：same-dir 模式下，所有遠端工作階段從這裡開始。留空 = ~/Developer。
 claude_rc_workdir: ""
