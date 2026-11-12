@@ -41,6 +41,9 @@ ssh_key_scopes:
 ssh_authorized_keys: []
 #  - "ssh-ed25519 AAAA... you@windows-desktop"
 #  - "ssh-ed25519 AAAA... iphone-shortcuts"
+# 撤銷：要拿掉的 key 從上面移到這裡（整行搬過來），套用時會從 authorized_keys 刪掉。
+# 比對只看金鑰本體，註解不同也算同一把。同一把不能兩邊都有。
+ssh_authorized_keys_revoked: []
 
 # ---- Remote Control（TAGS=claude-rc）---------------------------------------
 # 手機 / claude.ai/code 上看到的名字。

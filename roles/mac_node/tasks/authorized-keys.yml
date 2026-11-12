@@ -1,7 +1,19 @@
 ---
 # 允許登入這台的公鑰（Windows 桌機、iPhone 捷徑…）。
-# **只新增，不移除**（exclusive: false）：手動加過的 key 不會被清掉，也不會因為
-# config.yml 少貼一把就把自己鎖在外面。要撤銷一把 key 請手動編輯 authorized_keys。
+# **新增只看 ssh_authorized_keys，不會順手刪別的**（exclusive: false）：手動加過的 key
+# 不會被清掉，也不會因為 config.yml 少貼一把就把自己鎖在外面。
+# 要撤銷一把 key：把它從 ssh_authorized_keys 搬到 ssh_authorized_keys_revoked，再套用。
+- name: 同一把 key 不能同時在允許與撤銷清單
+  ansible.builtin.assert:
+    that: _overlap | length == 0
+    fail_msg: "這些 key 同時出現在 ssh_authorized_keys 與 ssh_authorized_keys_revoked：{{ _overlap }}"
+    quiet: true
+  vars:
+    # 只比對金鑰本體（第二欄），註解不同也算同一把
+    _overlap: >-
+      {{ ssh_authorized_keys | map('split') | map(attribute=1)
+         | intersect(ssh_authorized_keys_revoked | map('split') | map(attribute=1)) }}
+
 - name: ~/.ssh 目錄
   ansible.builtin.file:
     path: "{{ mac_node_home }}/.ssh"
@@ -15,6 +27,15 @@
     state: present
     exclusive: false
   loop: "{{ ssh_authorized_keys }}"
+  loop_control:
+    label: "{{ item.split(' ')[2] | default(item[:30]) }}"
+
+- name: 撤銷公鑰
+  ansible.posix.authorized_key:
+    user: "{{ ansible_facts.user_id }}"
+    key: "{{ item }}"
+    state: absent
+  loop: "{{ ssh_authorized_keys_revoked }}"
   loop_control:
     label: "{{ item.split(' ')[2] | default(item[:30]) }}"
 

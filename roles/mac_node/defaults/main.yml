@@ -38,6 +38,7 @@ ssh_key_tag: mac
 ssh_key_comment: ""
 ssh_key_scopes: [github]
 ssh_authorized_keys: []
+ssh_authorized_keys_revoked: []
 # scope → Host 的對應，同 wsl-bootstrap。沒列的原樣當 Host。
 mac_node_ssh_scope_hosts:
   github: github.com
