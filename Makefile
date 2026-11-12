@@ -104,8 +104,11 @@ init: _ensure-ansible ## 起手：補上 ansible，並印出下一步
 
 ##@ 安裝
 # 不帶 TAGS = 不帶 --tags = 全部（含 system 層，會問密碼）。
+# 先把 -K 算好再印一行乾淨的指令：直接寫在參數裡，make 會把整段判斷腳本一起印出來。
 install: _ensure-ansible _ensure-config _check-tags ## 套用：不帶 TAGS 全部，或 TAGS=claude-rc / TAGS=user
-	ansible-playbook $(PLAYBOOK) $(_ARGS) $$($(call _BECOME_FLAG))
+	@become=$$($(call _BECOME_FLAG))
+	echo "+ ansible-playbook $(PLAYBOOK) $(_ARGS) $$become"
+	ansible-playbook $(PLAYBOOK) $(_ARGS) $$become
 
 ##@ 先看再動
 # list   —— 有哪些項目、這台已經有哪些（唯讀）
@@ -122,7 +125,9 @@ list: _ensure-ansible ## 有哪些項目、已經有哪些、可用的 tag（唯
 	echo
 
 check: _ensure-ansible _ensure-config _check-tags ## 乾跑預覽（--check --diff）；同樣吃 TAGS=
-	ansible-playbook $(PLAYBOOK) $(_ARGS) --check --diff $$($(call _BECOME_FLAG))
+	@become=$$($(call _BECOME_FLAG))
+	echo "+ ansible-playbook $(PLAYBOOK) $(_ARGS) --check --diff $$become"
+	ansible-playbook $(PLAYBOOK) $(_ARGS) --check --diff $$become
 
 facts: _ensure-ansible ## 印出偵測到的環境
 	ansible-playbook $(PLAYBOOK) $(_CONN) $(_LIMIT) $(EXTRA) --tags always

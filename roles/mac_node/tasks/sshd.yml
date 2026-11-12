@@ -35,13 +35,19 @@
   check_mode: false
 
 # --check 時檔案沒有真的寫，生效值還是舊的，所以只在非 check 時斷言。
+# **一律轉小寫比對**：OpenSSH 10.5（macOS 27 內建）的 sshd -T 印 CamelCase
+# （PasswordAuthentication no），舊版印小寫。第一次套用時就因為這個誤判失敗（設定其實已生效）。
 - name: 確認生效
   ansible.builtin.assert:
     that:
-      - "'passwordauthentication no' in _sshd_t.stdout_lines"
-      - "'kbdinteractiveauthentication no' in _sshd_t.stdout_lines"
-      - "'permitrootlogin no' in _sshd_t.stdout_lines"
-      - "'pubkeyauthentication yes' in _sshd_t.stdout_lines"
-    fail_msg: "sshd -T 的生效值不對，檢查 /etc/ssh/sshd_config.d/ 的載入順序"
+      - "'passwordauthentication no' in _sshd_lc"
+      - "'kbdinteractiveauthentication no' in _sshd_lc"
+      - "'permitrootlogin no' in _sshd_lc"
+      - "'pubkeyauthentication yes' in _sshd_lc"
+    fail_msg: >-
+      sshd -T 的生效值不對：{{ _sshd_lc | select('match', '(password|kbdinteractive|pubkey)authentication |permitrootlogin ') | list }}。
+      檢查 /etc/ssh/sshd_config.d/ 的載入順序
     quiet: true
+  vars:
+    _sshd_lc: "{{ _sshd_t.stdout_lines | map('lower') | list }}"
   when: not ansible_check_mode

@@ -9,6 +9,9 @@
 # 寫檢查的規矩（同 dev-env-ansible「別把 exit code 洗掉」）：要判成敗就先
 # `out=$(cmd)` 再對 $out 檢查，不要 `cmd | grep | sed` 讓最後一個指令決定成敗。
 # Jinja 在這裡會先跑一遍：不要寫 `$` 後面接 `{#`（Jinja 的註解開頭）。
+# **變數後面緊接中文（含全形標點）一律寫 `${var}`**：ansible 底下的 bash 3.2 會把中文的第一個
+# byte 當成變數名稱的一部分吃掉，剩下的 byte 不是合法 UTF-8，整個 verify 直接炸掉
+# （實測：`$ifc）` → 「Refusing to deserialize an invalid UTF8 string」）。
 
 - name: 跑檢查
   ansible.builtin.shell:
@@ -24,7 +27,7 @@
         {% for k, v in mac_node_pmset_ac.items() %}
         grep -Eq '^ +{{ k }} +{{ v }}$' <<<"$ac" || bad="$bad {{ k }}"
         {% endfor %}
-        [ -z "$bad" ] || { echo "不符：$bad（make install TAGS=power）"; exit 1; }
+        [ -z "$bad" ] || { echo "不符：${bad}（make install TAGS=power）"; exit 1; }
         echo "sleep 0、womp 1 等 {{ mac_node_pmset_ac | length }} 項都對"
 
     - name: "pmset：蓋子模式 {{ mac_lid_mode }}"
@@ -32,14 +35,14 @@
       cmd: |
         have=$(/usr/bin/pmset -g | awk '$1=="SleepDisabled" {print $2}')
         want={{ '1' if mac_lid_mode == 'C' else '0' }}
-        [ "$have" = "$want" ] || [ -z "$have" -a "$want" = 0 ] || { echo "disablesleep=$have，應為 $want"; exit 1; }
+        [ "$have" = "$want" ] || [ -z "$have" -a "$want" = 0 ] || { echo "disablesleep=${have}，應為 $want"; exit 1; }
         echo "disablesleep=$want"
 
     - name: "關掉自動安裝 macOS 更新"
       level: fail
       cmd: |
         v=$(defaults read /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates 2>/dev/null || echo unset)
-        [ "$v" = 0 ] || { echo "AutomaticallyInstallMacOSUpdates=$v（make install TAGS=softwareupdate）"; exit 1; }
+        [ "$v" = 0 ] || { echo "AutomaticallyInstallMacOSUpdates=${v}（make install TAGS=softwareupdate）"; exit 1; }
         echo "已關閉"
 
     # ---- 主機與安全 ----
@@ -49,7 +52,7 @@
         want={{ (mac_host_name | default('')) | quote }}
         [ -n "$want" ] || { echo "config.yml 沒有 mac_host_name"; exit 2; }
         have=$(/usr/sbin/scutil --get LocalHostName)
-        [ "$have" = "$want" ] || { echo "LocalHostName=$have，應為 $want（make install TAGS=hostname）"; exit 1; }
+        [ "$have" = "$want" ] || { echo "LocalHostName=${have}，應為 ${want}（make install TAGS=hostname）"; exit 1; }
         echo "$have.local"
 
     - name: "FileVault 開著"
@@ -75,10 +78,21 @@
       level: fail
       cmd: |
         [ -f /etc/ssh/sshd_config.d/010-hardening.conf ] || { echo "沒有 010-hardening.conf（make install TAGS=sshd）"; exit 1; }
-        out=$(sudo -n /usr/sbin/sshd -T 2>/dev/null) || { echo "設定檔在；生效值要 root 才讀得到，請手動跑：sudo sshd -T | grep -E 'passwordauth|kbdinteractive'"; exit 2; }
-        grep -qx 'passwordauthentication no' <<<"$out" && grep -qx 'kbdinteractiveauthentication no' <<<"$out" \
-          || { echo "sshd -T 的生效值不對"; exit 1; }
-        echo "passwordauthentication no、kbdinteractiveauthentication no"
+        # (1) 設定值。sshd -T 沒有主機金鑰就不跑；給一把用完即丟的（-h），就不用 root。
+        #     OpenSSH 10.5 印 CamelCase、舊版印小寫 → 轉小寫比對。
+        t=$(mktemp -d) || { echo "mktemp 失敗"; exit 1; }
+        trap 'rm -f "$t/hk" "$t/hk.pub"; rmdir "$t"' EXIT
+        /usr/bin/ssh-keygen -q -t ed25519 -N '' -f "$t/hk" || { echo "產生暫時主機金鑰失敗"; exit 1; }
+        out=$(/usr/sbin/sshd -T -h "$t/hk" 2>&1 | tr '[:upper:]' '[:lower:]')
+        for kv in 'passwordauthentication no' 'kbdinteractiveauthentication no' 'permitrootlogin no'; do
+          grep -qx "$kv" <<<"$out" || { echo "sshd -T 缺「${kv}」"; exit 1; }
+        done
+        # (2) 實際連一次、不給金鑰：伺服器能接受的方式只該剩 publickey。
+        probe=$(/usr/bin/ssh -o BatchMode=yes -o PubkeyAuthentication=no -o StrictHostKeyChecking=no \
+                  -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
+                  "$(id -un)@127.0.0.1" true 2>&1 | tail -1)
+        [[ "$probe" == *"Permission denied (publickey)."* ]] || { echo "實際連線不只收金鑰：$probe"; exit 1; }
+        echo "設定值與實際連線都只收金鑰（密碼、鍵盤互動關閉，root 不准登入）"
 
     - name: "authorized_keys 有公鑰"
       level: fail
@@ -92,7 +106,7 @@
       level: fail
       cmd: |
         b={{ mac_node_claude_bin | quote }}
-        [ -x "$b" ] || { echo "找不到 $b（make install TAGS=claude）"; exit 1; }
+        [ -x "$b" ] || { echo "找不到 ${b}（make install TAGS=claude）"; exit 1; }
         "$b" --version 2>&1 | head -1
 
     - name: "登入 shell 沒有會弄壞 Remote Control 的變數"
@@ -200,8 +214,8 @@
       cmd: |
         ifc=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
         port=$(networksetup -listallhardwareports | awk -v i="$ifc" '/^Hardware Port:/ {p=substr($0, 16)} $2==i {print p}')
-        if [ "$port" = "Wi-Fi" ]; then echo "走 Wi-Fi（$ifc）：開機前的 SSH 解鎖在 Wi-Fi 上可能不行，建議接有線"; exit 1; fi
-        echo "走 $port（$ifc）"
+        if [ "$port" = "Wi-Fi" ]; then echo "走 Wi-Fi（${ifc}）：開機前的 SSH 解鎖在 Wi-Fi 上可能不行，建議接有線"; exit 1; fi
+        echo "走 ${port}（${ifc}）"
 
     # ---- 乾淨原則 ----
     - name: "brew 沒有 IaC 以外的套件"
