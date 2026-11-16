@@ -1,0 +1,42 @@
+---
+# 「要裝東西先問我」：在 ~/.claude/settings.json 的 permissions.ask 加上安裝類的指令。
+# 這台上的每個 Claude 工作階段（手機經 Remote Control、Desktop、終端機）碰到這些指令都會先
+# 跳出詢問，Miska 在手機上按允許或拒絕。雲端工作階段不讀這個檔，本來就碰不到這台。
+#
+# 為什麼放使用者設定、不用 `claude remote-control --settings <file>`：--settings 只在伺服器啟動時
+# 讀一次（改了要重啟 Remote Control，會切斷所有遠端工作階段），而且帶了它，Remote Control
+# 原本替工作階段打開的自動模式、auto-compact 就不會開（`claude remote-control --help`）。
+#
+# 只管自己的那幾條：讀現有 JSON → 原有的在前、缺的接在後面（不用 union：它不保證順序，
+# 重跑會判成有變化）→ 有不同才寫回。檔案其餘內容（Miska 自己的設定、
+# 用 /config 改的）原樣保留，key 順序不動。
+#
+# 這是**護欄，不是安全邊界**：規則比對的是指令文字，換個寫法（絕對路徑、包進腳本）就可能
+# 繞過。另外兩層是 ~/.claude/CLAUDE.md 的規矩（TAGS=claude-md）與 make verify 的漂移檢查。
+- name: ~/.claude
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.claude"
+    state: directory
+
+- name: 讀 ~/.claude/settings.json
+  ansible.builtin.slurp:
+    src: "{{ mac_node_home }}/.claude/settings.json"
+  register: _guard_raw
+  failed_when: false
+  check_mode: false
+
+- name: 算出加上護欄之後的內容
+  ansible.builtin.set_fact:
+    _guard_cur: "{{ _cur }}"
+    _guard_new: >-
+      {{ _cur | combine({'permissions': _perms | combine({'ask': ((_perms.ask | default([])) + claude_guard_ask) | unique})}) }}
+  vars:
+    _cur: "{{ (_guard_raw.content | b64decode | from_json) if (_guard_raw.content is defined) else {} }}"
+    _perms: "{{ _cur.permissions | default({}) }}"
+
+- name: 寫回 ~/.claude/settings.json（只在有不同時）
+  ansible.builtin.copy:
+    content: "{{ _guard_new | to_nice_json(indent=2, sort_keys=False) }}\n"
+    dest: "{{ mac_node_home }}/.claude/settings.json"
+    mode: "0644"
+  when: _guard_new != _guard_cur

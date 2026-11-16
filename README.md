@@ -34,7 +34,7 @@ TAGS 可以一次給多個：`TAGS=go,node`。碰到 system 層（`hostname`、`
 
 | 類別 | tag |
 |---|---|
-| Remote Control | `claude`、`tmux`、`claude-rc`、`claude-md` |
+| Remote Control | `claude`、`tmux`、`claude-rc`、`claude-md`、`claude-guard`（要裝東西先問） |
 | 連線與身分 | `tailscale`、`authorized-keys`、`ssh-keys`、`git-identity`、`sshd` |
 | 常駐節點 | `power`、`softwareupdate`、`hostname`、`arrive-home` |
 | 語言與容器 | `go`、`python`（只有 uv）、`node`、`pnpm`、`rust`、`podman`、`docker-compat` |

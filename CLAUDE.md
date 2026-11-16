@@ -61,6 +61,7 @@ mac-bootstrap/
 | `rust` | user | 官方 rustup-init `--no-modify-path` | 同 Linux 的拆法：`~/.rustup` 整包、`~/.cargo` 拆開；config/credentials 永遠保留 |
 | `docker-compat` | user | brew `docker-compose`（`podman compose` 的 provider）、`~/.local/bin/docker`（`exec podman` 的 shim）、`containers.conf` 關掉 provider 提示。引擎與指令都是 podman | brew 移除、刪 shim（只刪自己放的）、拿掉設定；檔案空了就刪 |
 | `godot` | user | 官方 zip（SHA512-SUMS 驗證）→ `~/Applications/Godot-<版本>.app`；`godot_versions` 列幾個裝幾個，清單外的刪掉；`godot-<版本>` 與 `godot` 指令 | 刪所有版本與指令（Godot 開著就拒絕）；DATA=1 刪編輯器設定與匯出範本 |
+| `claude-guard` | user | `~/.claude/settings.json` 的 `permissions.ask` 加上安裝類指令與 `sudo`（聯集，只在有不同時寫回；其餘內容原樣） | 只拿掉自己那幾條；空了拿掉 key，整個 `{}` 就刪檔 |
 | `claude-md` | user | `~/.claude/CLAUDE.md` 的 managed block（這台的規矩；Godot、Docker 相容那兩段裝了才寫） | 拿掉 block；只剩空白就刪檔。移除別的 tag 時會依現況重生 |
 | `profile` | user | `env.zsh`，由 `~/.zshenv` 與 `~/.zprofile` 各 source 一次 | 拿掉兩個 block、刪 env.zsh；rc 檔只剩空白就刪 |
 | `hostname` | system | 三個 `scutil --set` | 沒有「移除」：改 config 的名字再 install（Makefile 印說明） |
@@ -124,6 +125,5 @@ mac-bootstrap/
 
 ## 還沒做 / 待決定
 
-- 遠端工作階段的權限規則：`claude remote-control --settings <file>`，把 `brew install`、`npm i -g`、`sudo` 這類設成要詢問。要先跟 Miska 對一次 WSL 那邊的規則。
 - 子網路路由放 NAS 還是之後的 Mac mini（重開機實測後決定）；朋友連家裡服務的 Tailscale 存取規則（先改成明確允許清單再讓人進來）。
 - arrive-home 要開哪些 App、iPhone 捷徑；HANDOFF 階段 7 的排程任務。

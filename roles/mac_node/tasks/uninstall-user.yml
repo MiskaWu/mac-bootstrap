@@ -77,6 +77,52 @@
           - path: "{{ claude_rc_log_dir }}/claude-rc.err.log"
             what: Remote Control 的錯誤紀錄
 
+# ---- 「要裝東西先問我」的護欄 -------------------------------------------------
+# 只拿掉 claude_guard_ask 列的那幾條；permissions.ask 裡 Miska 自己加的留著。
+# ask 空了就拿掉 ask、permissions 空了就拿掉 permissions；整個檔變成 {} 就刪檔。
+- name: 安裝類指令的護欄
+  tags: [claude-guard]
+  block:
+    - name: 讀 ~/.claude/settings.json
+      ansible.builtin.slurp:
+        src: "{{ _u_home }}/.claude/settings.json"
+      register: _u_guard_raw
+      failed_when: false
+
+    - name: 算出拿掉護欄之後的內容
+      ansible.builtin.set_fact:
+        _u_guard_cur: "{{ _cur }}"
+        # permissions 還有東西就留在原位（combine 不改 key 順序）；空了就整個拿掉。
+        _u_guard_new: "{{ (_cur | combine({'permissions': _perms_new})) if _perms_new else _rest }}"
+      vars:
+        _cur: "{{ (_u_guard_raw.content | b64decode | from_json) if (_u_guard_raw.content is defined) else {} }}"
+        _perms: "{{ _cur.permissions | default({}) }}"
+        _ask: "{{ _perms.ask | default([]) | difference(claude_guard_ask) }}"
+        _perms_new: "{{ (_perms | dict2items | rejectattr('key', 'equalto', 'ask') | items2dict) | combine({'ask': _ask} if _ask else {}) }}"
+        _rest: "{{ _cur | dict2items | rejectattr('key', 'equalto', 'permissions') | items2dict }}"
+
+    - name: 寫回 ~/.claude/settings.json
+      ansible.builtin.copy:
+        content: "{{ _u_guard_new | to_nice_json(indent=2, sort_keys=False) }}\n"
+        dest: "{{ _u_home }}/.claude/settings.json"
+        mode: "0644"
+      when:
+        - _u_guard_raw.content is defined
+        - _u_guard_new != _u_guard_cur
+        - _u_guard_new | length > 0
+
+    - name: 只剩 {} 就刪檔
+      ansible.builtin.file:
+        path: "{{ _u_home }}/.claude/settings.json"
+        state: absent
+      when:
+        - _u_guard_raw.content is defined
+        - _u_guard_new | length == 0
+
+    - name: 護欄 —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['claude-guard'] }}"
+
 # ---- ~/.claude/CLAUDE.md 的 managed block -----------------------------------
 - name: ~/.claude/CLAUDE.md 的規矩
   tags: [claude-md]

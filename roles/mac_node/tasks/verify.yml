@@ -275,6 +275,20 @@
         /usr/bin/grep -q 'BEGIN mac-bootstrap (managed)' "$f" 2>/dev/null || { echo "沒有（make install TAGS=claude-md）"; exit 1; }
         echo "有"
 
+    # 規則用 plutil 讀（JSON 也吃），輸出的 / 會跳脫成 \/，比對前換回來。
+    - name: "要裝東西先問（~/.claude/settings.json 的 permissions.ask）"
+      level: warn
+      cmd: |
+        f="$HOME/.claude/settings.json"
+        [ -f "$f" ] || { echo "沒有 settings.json（make install TAGS=claude-guard）"; exit 1; }
+        ask=$(/usr/bin/plutil -extract permissions.ask json -o - "$f" 2>/dev/null | sed 's#\\/#/#g' || true)
+        n=0; missing=""
+        {% for r in claude_guard_ask %}
+        if /usr/bin/grep -qF -- {{ ('"' ~ r ~ '"') | quote }} <<<"$ask"; then n=$((n + 1)); else missing="$missing {{ r | quote }}"; fi
+        {% endfor %}
+        [ -z "$missing" ] || { echo "少了 $(echo $missing | wc -w | tr -d ' ') 條（make install TAGS=claude-guard）：${missing# }"; exit 1; }
+        echo "${n} 條安裝類指令會先問"
+
     - name: "全域 git 身分"
       level: fail
       cmd: |

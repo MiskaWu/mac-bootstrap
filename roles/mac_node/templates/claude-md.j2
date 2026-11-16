@@ -3,7 +3,8 @@
 - **主機要保持乾淨。** 開發工具與多個版本一律隔離：用專案自己的版本宣告、git worktree、podman 容器。
   不要全域安裝東西（`brew install`、`npm i -g`、`pip install`、`cargo install`、`uv tool install`、`go install`、`curl … | sh`）。
   工作上需要新工具時，在 `~/Developer/mac-bootstrap` 加一個 tag（安裝與 `make uninstall` 都要有），不要直接裝；不確定就先問 Miska。
-  `make verify` 會列出 IaC 以外的東西。
+  `make verify` 會列出 IaC 以外的東西。安裝類指令與 `sudo` 會先跳出詢問（TAGS=claude-guard）：被拒絕就是 Miska 不要，
+  不要換個寫法（絕對路徑、包進腳本）再試。
 - **這台的設定是 IaC。** 系統設定、常駐服務、PATH、要裝的工具都在 `~/Developer/mac-bootstrap`（Ansible + make）。
   要改就改那個 repo 再 `make install TAGS=<項目>`，不要直接動 `~/.zshenv`、`~/.zprofile`、LaunchAgent 或 `/etc`。
 - **Python 一律 `uv run` / `uv sync`**（專案的 `.venv`，版本由 `.python-version` / `requires-python` 宣告）。

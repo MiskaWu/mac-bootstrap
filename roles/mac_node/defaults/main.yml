@@ -67,6 +67,75 @@ podman_machine_cpus: 4
 podman_machine_memory: 8192
 podman_machine_disk: 100
 
+# ---- 要裝東西先問（tasks/claude-guard.yml）-------------------------------------
+# 加進 ~/.claude/settings.json 的 permissions.ask。比對規則（code.claude.com/docs/en/permissions）：
+#   - `*` 可以放在任何位置；開頭的 `*` 讓絕對路徑（/opt/homebrew/bin/brew …）也對得上。
+#   - `a && b`、`a | b` 會拆開逐段比對，任何一段對上就問 → `curl … | sh` 會以 `sh` 對上。
+#   - 前面帶環境變數（`FOO=1 brew install x`）照樣對得上。
+#   - 自動模式也會問；ask 排在 allow 前面，專案設定的 allow 蓋不過它。
+# 刻意不問的：專案層級的版本下載（uv run、pnpm exec、rustup 依 rust-toolchain.toml、go 的 toolchain）、
+# podman 容器裡的 apt —— 它們不落在主機的全域環境。
+claude_guard_ask:
+  # 主機套件管理
+  - "Bash(*brew install *)"
+  - "Bash(*brew reinstall *)"
+  - "Bash(*brew upgrade*)"
+  - "Bash(*brew uninstall *)"
+  - "Bash(*brew tap *)"
+  - "Bash(*brew link *)"
+  - "Bash(*brew bundle*)"
+  - "Bash(*installer -pkg*)"
+  - "Bash(*softwareupdate -i*)"
+  - "Bash(*softwareupdate --install*)"
+  - "Bash(*sudo *)"
+  # 透過 IaC 或專案的 make 裝到主機（這也是改主機，照樣先問）
+  - "Bash(*make install*)"
+  - "Bash(*make uninstall*)"
+  - "Bash(*ansible-playbook *)"
+  # 語言的全域安裝
+  - "Bash(*npm install -g*)"
+  - "Bash(*npm i -g*)"
+  - "Bash(*npm install --global*)"
+  - "Bash(*npm i --global*)"
+  - "Bash(*npm install * -g*)"
+  - "Bash(*npm i * -g*)"
+  - "Bash(*npm link*)"
+  - "Bash(*pnpm add -g*)"
+  - "Bash(*pnpm add --global*)"
+  - "Bash(*pnpm add * -g*)"
+  - "Bash(*pnpm install -g*)"
+  - "Bash(*pnpm i -g*)"
+  - "Bash(*pnpm link --global*)"
+  - "Bash(*pnpm env *)"
+  - "Bash(*yarn global *)"
+  - "Bash(*pip install *)"
+  - "Bash(*pip3 install *)"
+  - "Bash(*pipx install *)"
+  - "Bash(*uv tool install *)"
+  - "Bash(*cargo install *)"
+  - "Bash(*cargo binstall *)"
+  - "Bash(*rustup default *)"
+  - "Bash(*go install*)"
+  - "Bash(*gem install *)"
+  # 下載下來直接交給 shell 跑的安裝程式
+  - "Bash(sh)"
+  - "Bash(bash)"
+  - "Bash(zsh)"
+  - "Bash(sh -s*)"
+  - "Bash(bash -s*)"
+  - "Bash(*sh -c *curl *)"
+  - "Bash(*sh -c *wget *)"
+  # 主機的設定檔與 PATH 上的目錄（這些由 IaC 管）。Edit 規則也涵蓋 Write。
+  - "Edit(~/.zshenv)"
+  - "Edit(~/.zprofile)"
+  - "Edit(~/.zshrc)"
+  - "Edit(~/.bashrc)"
+  - "Edit(~/.bash_profile)"
+  - "Edit(~/.profile)"
+  - "Edit(~/Library/LaunchAgents/**)"
+  - "Edit(~/.local/bin/**)"
+  - "Edit(~/bin/**)"
+
 # ---- Godot（tasks/godot.yml）--------------------------------------------------
 # 多版本並存：列幾個裝幾個（~/Applications/Godot-<版本>.app），清單上沒有的會被移除。
 # 版本寫法同官方 release tag 去掉 -stable：x.y.0 是 "4.7"、之後是 "4.7.2"。

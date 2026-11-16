@@ -85,6 +85,10 @@
   ansible.builtin.import_tasks: godot.yml
   tags: [user, godot]
 
+- name: 要裝東西先問（~/.claude/settings.json 的 permissions.ask）
+  ansible.builtin.import_tasks: claude-guard.yml
+  tags: [user, claude-guard]
+
 - name: ~/.claude/CLAUDE.md 的規矩
   ansible.builtin.import_tasks: claude-md.yml
   tags: [user, claude-md, docker-compat, godot]
