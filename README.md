@@ -61,7 +61,7 @@ TAGS 可以一次給多個：`TAGS=go,node`。碰到 system 層（`hostname`、`
 - compose 用 `podman compose`（provider 是 docker-compose，只透過 podman 的 API 建容器）。
 - `docker …` 會交給 podman（`TAGS=docker-compat` 的 shim），寫死 `docker` 的腳本照樣能跑。
 - testcontainers 這類走 Docker API 的函式庫靠 `DOCKER_HOST`，不用另外設定。
-- VM 平常是關的：`podman machine start` / `podman machine stop`。
+- VM 常駐（裡面跑 GitHub Actions 的自架執行器，`TAGS=gha-runner`），不要 `podman machine stop`。
 
 Godot 沒有「專案自己下載版本」的機制，所以版本寫在 `config.yml` 的 `godot_versions`：列幾個裝幾個（`~/Applications/Godot-<版本>.app`、`godot-<版本>` 指令），拿掉的會被刪。
 
