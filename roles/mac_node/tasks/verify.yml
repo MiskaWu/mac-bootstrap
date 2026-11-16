@@ -132,7 +132,7 @@
         "$t" has-session -t ={{ claude_rc_session }} 2>/dev/null || { echo "session 不在（等 5 分鐘內 LaunchAgent 重建，或 launchctl kickstart）"; exit 1; }
         echo "在"
 
-    - name: "Remote Control 沒有卡在第一次的確認問題"
+    - name: "Remote Control 已連線（沒有卡在第一次的確認問題）"
       level: fail
       cmd: |
         t={{ mac_node_tmux_bin | quote }}
@@ -143,14 +143,25 @@
           echo "卡在問題上：先在真的終端機手動跑一次 claude remote-control 回答問題，再 tmux kill-session -t {{ claude_rc_session }}"
           exit 1
         fi
-        grep -q 'Connected' <<<"$out" || { echo "畫面上沒有 Connected：$(grep -v '^[[:space:]]*$' <<<"$out" | tail -1)"; exit 1; }
-        echo "$(grep -m1 'Connected' <<<"$out" | sed 's/^[^A-Za-z]*//')"
+        # 連線狀態不看畫面：「Connected」那行只在一開始印，跑久了會被「Reconnected after …」
+        # 的紀錄擠出畫面（實測）。改看伺服器程序有沒有對外的 443 連線。
+        pids=$(pgrep -a -f '^[^ ]*/claude remote-control' || true)
+        [ -n "$pids" ] || { echo "沒有找到 remote-control 程序"; exit 1; }
+        n=0
+        for p in $pids; do
+          c=$(/usr/sbin/lsof -nP -a -p "$p" -iTCP:443 -sTCP:ESTABLISHED 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
+          n=$((n + c))
+        done
+        [ "$n" -gt 0 ] || { echo "伺服器沒有對外連線。畫面最後一行：$(grep -v '^[[:space:]]*$' <<<"$out" | tail -1)"; exit 1; }
+        echo "已連線（${n} 條 443 連線）"
 
     - name: "Remote Control 伺服器的環境是乾淨的"
       level: fail
       cmd: |
-        # 錨在行首：只抓 argv[0] 是 claude 的那支，不要抓到這段檢查自己的 bash 或外層的 zsh -c
-        pids=$(pgrep -f '^[^ ]*/claude remote-control' || true)
+        # 錨在行首：只抓 argv[0] 是 claude 的那支，不要抓到這段檢查自己的 bash 或外層的 zsh -c。
+        # -a 一定要：macOS 的 pgrep 預設不列出自己的上層程序。從手機開的工作階段跑 verify 時，
+        # remote-control 伺服器正是上層，不加 -a 就永遠「找不到」（實測）。
+        pids=$(pgrep -a -f '^[^ ]*/claude remote-control' || true)
         [ -n "$pids" ] || { echo "沒有找到 remote-control 程序"; exit 1; }
         for p in $pids; do
           envs=$(ps eww -o command= -p "$p" 2>/dev/null || true)
@@ -288,6 +299,84 @@
           exit 1
         fi
         echo "只有 IaC 宣告的"
+
+    # brew 以外裝進主機的路：拖進來的 App、.pkg、開機或登入就跑的 plist、丟進 ~/.local/bin 的執行檔。
+    # 允許清單在 defaults 的 mac_node_allowed_*。
+    - name: "App、.pkg、開機啟動項目、執行檔沒有 IaC 以外的"
+      level: warn
+      cmd: |
+        hit() { local s=$1 p; shift; for p in "$@"; do [[ $s == $p ]] && return 0; done; return 1; }
+        allow_apps=({{ mac_node_allowed_apps | map('quote') | join(' ') }})
+        allow_pkgs=({{ mac_node_allowed_pkgs | map('quote') | join(' ') }})
+        allow_launchd=({{ mac_node_allowed_launchd | map('quote') | join(' ') }})
+        allow_bins=({{ mac_node_allowed_user_bins | map('quote') | join(' ') }})
+        extra=""
+        while IFS= read -r a; do
+          id=$(/usr/bin/defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null || echo "?")
+          [[ $id == com.apple.* ]] && continue
+          hit "$id" "${allow_apps[@]}" || extra="$extra app:${a##*/}"
+        done < <(/usr/bin/find /Applications "$HOME/Applications" -maxdepth 3 -name '*.app' -prune 2>/dev/null)
+        for p in $(/usr/sbin/pkgutil --pkgs); do
+          [[ $p == com.apple.* ]] && continue
+          hit "$p" "${allow_pkgs[@]}" || extra="$extra pkg:${p}"
+        done
+        for d in "$HOME/Library/LaunchAgents" /Library/LaunchAgents /Library/LaunchDaemons; do
+          for f in "$d"/*.plist; do
+            [ -e "$f" ] || continue
+            n=${f##*/}; n=${n%.plist}
+            hit "$n" "${allow_launchd[@]}" || extra="$extra launchd:${n}"
+          done
+        done
+        for f in "$HOME"/.local/bin/* "$HOME"/.local/bin/.[!.]* "$HOME"/bin/* "$HOME"/bin/.[!.]*; do
+          [ -e "$f" ] || [ -L "$f" ] || continue
+          r=${f#"$HOME"/}
+          hit "$r" "${allow_bins[@]}" || extra="$extra ~/${r}"
+        done
+        [ -z "$extra" ] || { echo "多出來的：${extra# }（只報告不移除；要留就加進 IaC 或 mac_node_allowed_*）"; exit 1; }
+        echo "只有 IaC 宣告的"
+
+    # 語言工具各自的「全域安裝」。這台的規矩是工具跟著專案走（README「語言的原則」），
+    # 全域裝的東西不在任何專案的宣告裡，換一台就不見。
+    - name: "語言工具沒有全域安裝的套件"
+      level: warn
+      cmd: |
+        extra=""
+        nm="$HOME/.local/node/lib/node_modules"
+        if [ -d "$nm" ]; then
+          for d in "$nm"/* "$nm"/@*/*; do
+            [ -e "$d" ] || continue
+            n=${d#"$nm"/}
+            [[ $n == npm || $n == corepack || $n == @* && ! $n == */* ]] && continue
+            extra="$extra npm:${n}"
+          done
+        fi
+        if [ -x {{ mac_node_brew_prefix | quote }}/bin/pnpm ]; then
+          for d in $(PATH="$HOME/.local/node/bin:$PATH" {{ mac_node_brew_prefix | quote }}/bin/pnpm ls -g --depth=0 --parseable 2>/dev/null | tail -n +2); do
+            extra="$extra pnpm:${d##*/}"
+          done
+        fi
+        if [ -x "$HOME/.cargo/bin/cargo" ]; then
+          for c in $("$HOME/.cargo/bin/cargo" install --list 2>/dev/null | awk '/^[^ ]/ {print $1}'); do
+            extra="$extra cargo:${c}"
+          done
+        fi
+        if [ -x {{ mac_node_brew_prefix | quote }}/bin/uv ]; then
+          td=$({{ mac_node_brew_prefix | quote }}/bin/uv tool dir 2>/dev/null || true)
+          for d in "$td"/*; do
+            [ -n "$td" ] && [ -e "$d" ] || continue
+            extra="$extra uv-tool:${d##*/}"
+          done
+        fi
+        if [ -x {{ mac_node_brew_prefix | quote }}/bin/go ]; then
+          gb=$({{ mac_node_brew_prefix | quote }}/bin/go env GOBIN 2>/dev/null || true)
+          [ -n "$gb" ] || gb="$({{ mac_node_brew_prefix | quote }}/bin/go env GOPATH 2>/dev/null)/bin"
+          for f in "$gb"/*; do
+            [ -e "$f" ] || continue
+            extra="$extra go:${f##*/}"
+          done
+        fi
+        [ -z "$extra" ] || { echo "全域裝的：${extra# }（只報告不移除；工具請寫進專案自己的宣告）"; exit 1; }
+        echo "沒有（npm、pnpm、cargo、uv tool、go install 都是空的）"
   loop_control:
     label: "{{ item.name }}"
   register: _verify

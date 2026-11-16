@@ -12,7 +12,7 @@ Miska 家裡這台 MacBook Pro（Mac16,5，M4 Max，64 GB，macOS 27）的 IaC�
 
 1. **sudo 由 Miska 自己在終端機跑。** 列出完整指令，不要求、不經手、不保存密碼。system 層的 tag 會讓 Makefile 自動加 `-K`，密碼只進 Ansible 的提示。
 2. **不關 FileVault、不開自動登入、UniFi 不開任何對外 port、這台不存任何 2FA secret。**
-3. **主機乾淨。** 主機上只能有 tag 裝的東西（加上 bring-up 的 Homebrew、make，與 Makefile 補的 ansible）。要多一樣：多一個 tag、多一段 uninstall、說得出為什麼不能放進容器或專案自己的宣告。`make verify` 的 brew 漂移檢查會抓到手動裝的東西。
+3. **主機乾淨。** 主機上只能有 tag 裝的東西（加上 bring-up 的 Homebrew、make，與 Makefile 補的 ansible）。要多一樣：多一個 tag、多一段 uninstall、說得出為什麼不能放進容器或專案自己的宣告。`make verify` 的漂移檢查會抓到手動裝的東西：brew、`/Applications` 與 `~/Applications` 的 App、.pkg 收據、LaunchAgents / LaunchDaemons、`~/.local/bin` 與 `~/bin`、npm / pnpm / cargo / uv tool / go install 的全域安裝。允許清單在 `defaults/main.yml` 的 `mac_node_brew_allowed_*` 與 `mac_node_allowed_*`。
 4. **每一項都要能乾淨移除。** 新增 tag 時，同一個 commit 裡要有 `uninstall-user.yml`（或 `uninstall-system.yml`）的對應段落，或在 Makefile 的 `_check-uninstall-tags` 寫明為什麼只能手動。
 5. **repo 不公開。** 機器專屬的值只放 `config.yml`（gitignored）；`SETUP-LOG.md` 記了 IP、公鑰指紋，也 gitignored。
 6. **改設定走 IaC。** 不要直接改 `~/.zshenv`、`~/.zprofile`、LaunchAgent、`/etc`；改 repo 再 `make install TAGS=…`。
@@ -71,7 +71,7 @@ mac-bootstrap/
 1. `tasks/<tag>.yml`；在 `main-user.yml`（或 `main-system.yml`）import，tag 掛 `[user, <tag>]`。它需要什麼，就把自己的 tag 掛到那些前置 import 上。
 2. 影響 PATH 或環境變數 → `profile.yml` 的 stat 清單、`env.zsh.j2` 各補一段，並把 tag 加到 profile 那行 import。
 3. `uninstall-user.yml` 補一段（tag 同名、登記 `_uninstall_data` / `_uninstall_keep` / `_uninstall_rmdir`），順序放在它相依的東西**之前**（移除是反向）。
-4. `list.yml` 補一行；`verify.yml` 補檢查；brew 套件補到 `mac_node_brew_allowed_formulae`。
+4. `list.yml` 補一行；`verify.yml` 補檢查；brew 套件補到 `mac_node_brew_allowed_formulae`，App、.pkg、plist、`~/.local/bin` 的執行檔補到對應的 `mac_node_allowed_*`。
 5. 實測：`make check` → `make install` → 再跑一次要 `changed=0` → `make uninstall` → `make uninstall DATA=1` 後確認沒有殘留 → 再裝回來。
 
 ## 慣例
@@ -102,6 +102,8 @@ mac-bootstrap/
 13. **第一次跑 Ansible 會跳「允許 Python 尋找區域網路上的裝置」**（gather_facts 查主機名稱觸發）→ 本機模式不需要，按不允許。
 14. **Windows 內建 OpenSSH 9.5 的 `ssh-keyscan` 會選 sntrup761 再自己報錯** → Windows 上比對指紋用 `ssh -v`。
 15. **睡著的機器叫不醒**（Wi-Fi 上的網路喚醒不可靠）→ 接電永不睡、只關螢幕。**開機解鎖前什麼都沒起來**：GUI 版 Tailscale、LaunchAgent 都要等 GUI 登入。
+16. **macOS 的 `pgrep` 預設不列出自己的上層程序** → 從手機開的工作階段是 remote-control 伺服器的子程序，用 `pgrep` 找伺服器永遠找不到。一律 `pgrep -a`。
+17. **Remote Control 畫面上的 `Connected` 只在一開始印一次**，跑久了會被 `Reconnected after …` 的紀錄擠出畫面 → 判斷連線看伺服器程序有沒有 443 的 ESTABLISHED（`lsof -a -p <pid> -iTCP:443 -sTCP:ESTABLISHED`）。
 
 ## 手動的事（刻意不自動化）
 

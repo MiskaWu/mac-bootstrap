@@ -81,3 +81,31 @@ arrive_home_urls: []
 # 加一個 brew 套件的 task 時，回來這裡補一行。
 mac_node_brew_allowed_formulae: [make, ansible, tmux, go, uv, pnpm, podman]
 mac_node_brew_allowed_casks: ["{{ mac_node_tailscale_cask }}"]
+
+# brew 以外「允許存在」的東西。比對用 bash 的 glob（可以寫 *）。同樣只報告、不移除。
+# 每一行註明是誰裝的。「還沒納入 IaC」的是在 IaC 之前就手動裝好的，之後要收成 tag。
+#
+# 非 Apple 的 .app（/Applications 與 ~/Applications，比對 bundle id；com.apple.* 不檢查）
+mac_node_allowed_apps:
+  - io.tailscale.ipn.macsys                   # tailscale（手動 brew --cask，.pkg）
+  - com.anthropic.claudefordesktop            # Claude Desktop（手動，還沒納入 IaC）
+  - com.google.Chrome                         # Chrome（手動，還沒納入 IaC）
+  - com.google.Chrome.app.*                   # Chrome 建的網頁 App（~/Applications/Chrome Apps）
+  - com.google.chromeremotedesktop.*          # Chrome 遠端桌面主機附的移除程式（手動，還沒納入 IaC）
+# 非 Apple 的安裝收據（pkgutil --pkgs）
+mac_node_allowed_pkgs:
+  - com.tailscale.ipn.macsys                  # tailscale
+  - com.google.pkg.ChromeRemoteDesktopHost*   # Chrome 遠端桌面主機
+  - com.google.pkg.Keystone                   # Google 的自動更新（Chrome 遠端桌面主機帶進來的）
+# 開機或登入就會跑的東西：~/Library/LaunchAgents、/Library/LaunchAgents、/Library/LaunchDaemons
+# 的 plist（比對檔名，去掉 .plist）
+mac_node_allowed_launchd:
+  - "{{ claude_rc_label }}"                   # claude-rc
+  - com.google.keystone.*                     # Google 的自動更新（舊版 Keystone）
+  - com.google.GoogleUpdater.*                # Google 的自動更新（新版 GoogleUpdater）
+  - org.chromium.chromoting*                  # Chrome 遠端桌面主機
+# 使用者的執行檔目錄。curl | sh 的安裝程式最常把東西丟在這裡。
+mac_node_allowed_user_bins:
+  - .local/bin/claude                         # claude
+  - bin/arrive-home.sh                        # arrive-home
+  - bin/claude-rc-server.sh                   # claude-rc
