@@ -12,7 +12,7 @@
   uv 下載的 Python 刻意不放進 PATH（`UV_PYTHON_INSTALL_BIN=0`）。
 - **Node**：主機的是 `~/.local/node`（版本看 `node -v`）。
 - **容器**：podman machine（沒有 Docker Desktop、沒有 `/var/run/docker.sock`，`DOCKER_HOST` 已設好）。
-  VM 平常是關的：用之前 `podman machine start`，用完 `podman machine stop`。
+  VM 是常駐的（裡面跑 GitHub Actions 的自架執行器，TAGS=gha-runner）：**不要 `podman machine stop`**；關了 5 分鐘內也會被拉回來。
   有裝 Docker 相容（`~/.local/bin/docker` 存在）時：`docker …` 交給 podman、compose 用 `podman compose`（provider 是 docker-compose）。
 - **Godot**：多個版本並存在 `~/Applications/Godot-<版本>.app`，指令是 `godot-<版本>`（`ls ~/.local/bin/godot-*` 看有哪些），
   `godot` 指向預設版本。專案用哪一版看 `project.godot` 的 `config/features`，不要用新版開舊專案（會轉換專案檔）。

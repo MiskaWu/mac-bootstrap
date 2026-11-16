@@ -162,6 +162,24 @@ claude_guard_ask: >-
      + (['Bash(*/'] | product(claude_guard_ask_commands) | map('join') | map('regex_replace', '$', '*)') | list)
      + claude_guard_ask_extra }}
 
+# ---- GitHub Actions 自架執行器（tasks/gha-runner.yml）------------------------------
+# 放在 podman machine 裡（2026-11-17 Miska 定：先放這台，Mac mini 到了再搬）。repo 層級的執行器，只服務一個 repo。
+gha_runner_repo: MiskaWu/jury
+gha_runner_name: macbook-pro
+gha_runner_labels: [jury]
+# 官方 release（github.com/actions/runner/releases），sha256 取自那一版 release 頁上的 linux-arm64 那行。
+gha_runner_version: "2.338.2"
+gha_runner_sha256: 670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
+gha_runner_image: localhost/gha-runner
+# Docker 引擎（給 jury 的 buildx）。主版號釘住，換版改這裡再 make install TAGS=gha-runner。
+gha_runner_docker_image: docker.io/library/docker:29-dind
+gha_runner_network: gha-jury
+gha_runner_container: gha-jury-runner
+gha_runner_docker_container: gha-jury-docker
+gha_runner_docker_volume: gha-jury-docker
+gha_runner_state_volume: gha-jury-state
+gha_runner_label: local.gha-runner
+
 # ---- Godot（tasks/godot.yml）--------------------------------------------------
 # 多版本並存：列幾個裝幾個（~/Applications/Godot-<版本>.app），清單上沒有的會被移除。
 # 版本寫法同官方 release tag 去掉 -stable：x.y.0 是 "4.7"、之後是 "4.7.2"。
@@ -308,6 +326,7 @@ mac_node_allowed_pkgs:
 # 的 plist（比對檔名，去掉 .plist）
 mac_node_allowed_launchd:
   - "{{ claude_rc_label }}"                   # claude-rc
+  - "{{ gha_runner_label }}"                  # gha-runner
   - com.google.keystone.*                     # Google 的自動更新（舊版 Keystone）
   - com.google.GoogleUpdater.*                # Google 的自動更新（新版 GoogleUpdater）
   - org.chromium.chromoting*                  # Chrome 遠端桌面主機
@@ -323,3 +342,4 @@ mac_node_allowed_user_bins:
   - bin/arrive-home.sh                        # arrive-home
   - bin/claude-rc-server.sh                   # claude-rc
   - bin/claude-rc-entry                       # claude-rc（臨時開關專案的起點）
+  - bin/gha-runner-keepalive.sh               # gha-runner

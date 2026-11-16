@@ -1,0 +1,235 @@
+---
+# GitHub Actions 自架執行器（gha_runner_repo，目前是 jury）。跑在 podman machine 裡的兩個容器：
+#   gha_runner_docker_container  docker:dind，真正的 Docker 引擎。jury 的 image 那段用 docker/setup-buildx-action 與
+#                                build-push-action，podman 代替不了（jury 的 deploy/README.md「自架執行器」）。
+#                                只在 podman 網路 gha_runner_network 裡、不對外開埠，執行器經 DOCKER_HOST 連過去。
+#   gha_runner_container         執行器本身（files/gha-runner/Containerfile 建的映像，Debian trixie）。
+# 為什麼不裝在主機上：主機只用 podman（Docker Desktop 不裝）；jury 的測試要 Linux（/proc、flock、setsid）。
+#
+# 2026-11-17 實測：GitHub 帳戶付款失敗時，GitHub 的機器不跑，自架執行器照樣會被派工作（run 43920923127）。
+# 雙架構映像在這個 Docker 裡建得出來（podman machine 已經登記 amd64 的 binfmt，dind 共用同一個核心）。
+#
+# 註冊：用 gh 向 GitHub 要一小時效期的註冊權杖，只傳給一次性的 register 容器（no_log，不寫進任何檔案）；
+# 註冊結果放在磁碟區 gha_runner_state_volume，常駐的容器不帶權杖。
+#
+# 常駐：LaunchAgent gha_runner_label 在登入時與之後每 5 分鐘確保 podman machine 與兩個容器都在跑。
+# 所以 podman machine 從此常駐（原本「用之前開、用完關」的規矩對這台不再成立）。
+#
+# 接上 repo（設 JURY_RUNNER 變數）不在這裡做：那是 repo 的設定，照 jury 的 deploy/README.md。
+- name: 執行器 —— 需要 podman 與 gh 已登入
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/gh", auth, status, --hostname, github.com]
+  register: _gha_gh
+  changed_when: false
+  failed_when: _gha_gh.rc != 0
+  check_mode: false
+
+- name: 執行器 —— podman machine 開著
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/podman", machine, inspect, "{{ podman_machine_name }}", --format, "{{ '{{' }}.State{{ '}}' }}"]
+  register: _gha_vm
+  changed_when: false
+  check_mode: false
+
+- name: 執行器 —— 開 podman machine
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/podman", machine, start, "{{ podman_machine_name }}"]
+  when: _gha_vm.stdout != 'running' and not ansible_check_mode
+
+# ---- 映像（Containerfile 或 entrypoint 一變就換標籤、重建）---------------------------
+- name: 執行器 —— 映像的原始檔
+  ansible.builtin.stat:
+    path: "{{ role_path }}/files/gha-runner/{{ item }}"
+    checksum_algorithm: sha256
+  loop: [Containerfile, entrypoint.sh]
+  register: _gha_src
+  check_mode: false
+
+- name: 執行器 —— 映像標籤（版本＋原始檔雜湊）
+  ansible.builtin.set_fact:
+    _gha_image: >-
+      {{ gha_runner_image }}:{{ gha_runner_version }}-{{ (_gha_src.results | map(attribute='stat.checksum') | join('') ~ gha_runner_sha256) | hash('sha256') | truncate(12, True, '') }}
+
+- name: 執行器 —— 映像在不在
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/podman", image, exists, "{{ _gha_image }}"]
+  register: _gha_img
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: 執行器 —— 建映像（第一次要下載 Debian 套件與瀏覽器，約 10 分鐘）
+  ansible.builtin.command:
+    argv:
+      - "{{ mac_node_brew_prefix }}/bin/podman"
+      - build
+      - --quiet
+      - --tag
+      - "{{ _gha_image }}"
+      - --build-arg
+      - "RUNNER_VERSION={{ gha_runner_version }}"
+      - --build-arg
+      - "RUNNER_SHA256={{ gha_runner_sha256 }}"
+      - "{{ role_path }}/files/gha-runner"
+  when: _gha_img.rc != 0 and not ansible_check_mode
+
+# ---- 網路與磁碟區 ---------------------------------------------------------------
+- name: 執行器 —— podman 網路
+  ansible.builtin.shell:
+    cmd: |
+      p={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+      "$p" network exists {{ gha_runner_network | quote }} && exit 0
+      "$p" network create {{ gha_runner_network | quote }} >/dev/null && echo created
+    executable: /bin/bash
+  register: _gha_net
+  changed_when: "'created' in _gha_net.stdout"
+  when: not ansible_check_mode
+
+- name: 執行器 —— 磁碟區（Docker 的資料、註冊資料）
+  ansible.builtin.shell:
+    cmd: |
+      p={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+      for v in {{ gha_runner_docker_volume | quote }} {{ gha_runner_state_volume | quote }}; do
+        "$p" volume exists "$v" || { "$p" volume create "$v" >/dev/null && echo "created $v"; }
+      done
+    executable: /bin/bash
+  register: _gha_vol
+  changed_when: "'created' in _gha_vol.stdout"
+  when: not ansible_check_mode
+
+# ---- Docker 引擎 ----------------------------------------------------------------
+- name: 執行器 —— Docker 引擎容器
+  ansible.builtin.shell:
+    cmd: |
+      p={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+      c={{ gha_runner_docker_container | quote }}
+      want={{ gha_runner_docker_image | quote }}
+      have=$("$p" inspect "$c" --format '{{ '{{' }}.ImageName{{ '}}' }}' 2>/dev/null || true)
+      [ "$have" = "$want" ] && exit 0
+      [ -n "$have" ] && "$p" rm -f "$c" >/dev/null
+      "$p" run -d --name "$c" --network {{ gha_runner_network | quote }} --network-alias docker \
+        --privileged -e DOCKER_TLS_CERTDIR= -v {{ gha_runner_docker_volume | quote }}:/var/lib/docker \
+        "$want" >/dev/null && echo created
+    executable: /bin/bash
+  register: _gha_dind
+  changed_when: "'created' in _gha_dind.stdout"
+  when: not ansible_check_mode
+
+# ---- 註冊（只在磁碟區裡還沒有註冊資料時）---------------------------------------------
+- name: 執行器 —— 註冊過了沒
+  ansible.builtin.command:
+    argv:
+      - "{{ mac_node_brew_prefix }}/bin/podman"
+      - run
+      - --rm
+      - --entrypoint
+      - test
+      - -v
+      - "{{ gha_runner_state_volume }}:/state:U"
+      - "{{ _gha_image }}"
+      - -f
+      - /state/.runner
+  register: _gha_registered
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: 執行器 —— 向 GitHub 註冊（權杖由 gh 取、只進這一次的容器）
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      export RUNNER_TOKEN
+      RUNNER_TOKEN=$({{ (mac_node_brew_prefix ~ '/bin/gh') | quote }} api -X POST repos/{{ gha_runner_repo }}/actions/runners/registration-token --jq .token)
+      {{ (mac_node_brew_prefix ~ '/bin/podman') | quote }} run --rm -e RUNNER_TOKEN \
+        -e RUNNER_URL=https://github.com/{{ gha_runner_repo }} -e RUNNER_NAME={{ gha_runner_name | quote }} \
+        -e RUNNER_LABELS={{ gha_runner_labels | join(',') | quote }} \
+        -v {{ gha_runner_state_volume | quote }}:/state:U {{ _gha_image | quote }} register
+    executable: /bin/bash
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - _gha_registered.rc != 0
+
+# ---- 執行器容器（映像換了就重建；註冊資料在磁碟區，不用重新註冊）---------------------------
+- name: 執行器 —— 執行器容器
+  ansible.builtin.shell:
+    cmd: |
+      p={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+      c={{ gha_runner_container | quote }}
+      want={{ _gha_image | quote }}
+      have=$("$p" inspect "$c" --format '{{ '{{' }}.ImageName{{ '}}' }}' 2>/dev/null || true)
+      [ "$have" = "$want" ] && exit 0
+      [ -n "$have" ] && "$p" rm -f "$c" >/dev/null
+      "$p" run -d --name "$c" --network {{ gha_runner_network | quote }} \
+        -e DOCKER_HOST=tcp://docker:2375 -v {{ gha_runner_state_volume | quote }}:/state:U \
+        "$want" run >/dev/null && echo created
+    executable: /bin/bash
+  register: _gha_run
+  changed_when: "'created' in _gha_run.stdout"
+  when: not ansible_check_mode
+
+- name: 執行器 —— 清掉不再使用的舊版映像
+  ansible.builtin.shell:
+    cmd: |
+      p={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+      "$p" images --format '{{ '{{' }}.Repository{{ '}}' }}:{{ '{{' }}.Tag{{ '}}' }}' \
+        | grep '^{{ gha_runner_image }}:' | grep -vx {{ _gha_image | quote }} \
+        | while read -r i; do "$p" rmi "$i" >/dev/null 2>&1 && echo "removed $i"; done
+    executable: /bin/bash
+  register: _gha_prune
+  changed_when: "'removed' in _gha_prune.stdout"
+  when: not ansible_check_mode
+
+# ---- 常駐：LaunchAgent（同 claude-rc 的做法）-----------------------------------------
+- name: 執行器 —— ~/bin/gha-runner-keepalive.sh
+  ansible.builtin.template:
+    src: gha-runner-keepalive.sh.j2
+    dest: "{{ mac_node_home }}/bin/gha-runner-keepalive.sh"
+    mode: "0755"
+
+- name: 執行器 —— LaunchAgent plist
+  ansible.builtin.template:
+    src: local.gha-runner.plist.j2
+    dest: "{{ mac_node_home }}/Library/LaunchAgents/{{ gha_runner_label }}.plist"
+    mode: "0644"
+    validate: /usr/bin/plutil -lint %s
+  register: _gha_plist
+
+- name: 執行器 —— LaunchAgent 有沒有載入
+  ansible.builtin.command:
+    argv: [/bin/launchctl, print, "gui/{{ ansible_facts.user_uid }}/{{ gha_runner_label }}"]
+  register: _gha_print
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: 執行器 —— plist 變了 → 先卸載
+  ansible.builtin.command:
+    argv: [/bin/launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ gha_runner_label }}"]
+  when: _gha_plist.changed and _gha_print.rc == 0
+
+- name: 執行器 —— 載入 LaunchAgent
+  ansible.builtin.command:
+    argv: [/bin/launchctl, bootstrap, "gui/{{ ansible_facts.user_uid }}", "{{ mac_node_home }}/Library/LaunchAgents/{{ gha_runner_label }}.plist"]
+  register: _gha_bootstrap
+  retries: 5
+  delay: 2
+  until: _gha_bootstrap.rc == 0
+  when: _gha_print.rc != 0 or _gha_plist.changed
+
+# ---- 確認 GitHub 那邊看得到它在線 -------------------------------------------------------
+- name: 執行器 —— GitHub 上在線
+  ansible.builtin.command:
+    argv:
+      - "{{ mac_node_brew_prefix }}/bin/gh"
+      - api
+      - "repos/{{ gha_runner_repo }}/actions/runners"
+      - --jq
+      - '.runners[] | select(.name == "{{ gha_runner_name }}") | .status'
+  register: _gha_online
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: _gha_online.stdout == 'online'
+  check_mode: false
+  when: not ansible_check_mode

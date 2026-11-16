@@ -537,10 +537,94 @@
         _uninstall_done: "{{ _uninstall_done + ['docker-compat'] }}"
         _uninstall_brew: true
 
+# ---- GitHub Actions 自架執行器 ----------------------------------------------------
+# 先從 GitHub 註銷（用 gh 刪掉那台執行器），再拆容器、網路、LaunchAgent。註冊資料的磁碟區跟著刪
+# （註銷之後就沒用了）；Docker 的建置快取與映像只在 DATA=1 時刪。
+# repo 的 JURY_RUNNER 變數不在這裡動：沒刪的話，工作會排隊等一台不存在的執行器，報告會提醒。
+- name: GitHub Actions 自架執行器
+  tags: [gha-runner]
+  block:
+    - name: 從 GitHub 註銷
+      ansible.builtin.shell:
+        cmd: |
+          gh={{ (mac_node_brew_prefix ~ '/bin/gh') | quote }}
+          id=$("$gh" api repos/{{ gha_runner_repo }}/actions/runners --jq '.runners[] | select(.name == "{{ gha_runner_name }}") | .id')
+          [ -z "$id" ] && exit 0
+          "$gh" api -X DELETE "repos/{{ gha_runner_repo }}/actions/runners/$id" && echo removed
+        executable: /bin/bash
+      register: _u_gha_dereg
+      changed_when: "'removed' in _u_gha_dereg.stdout"
+
+    - name: 卸載 LaunchAgent
+      ansible.builtin.command:
+        argv: [/bin/launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ gha_runner_label }}"]
+      register: _u_gha_bootout
+      changed_when: _u_gha_bootout.rc == 0
+      failed_when: false
+
+    - name: 刪 plist 與常駐腳本
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ _u_home }}/Library/LaunchAgents/{{ gha_runner_label }}.plist"
+        - "{{ _u_home }}/bin/gha-runner-keepalive.sh"
+
+    - name: 拆容器、網路、註冊資料
+      ansible.builtin.shell:
+        cmd: |
+          p={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+          [ -x "$p" ] || exit 0
+          "$p" machine inspect {{ podman_machine_name | quote }} --format '{{ '{{' }}.State{{ '}}' }}' 2>/dev/null | grep -qx running || { echo "podman machine 沒開，容器留著"; exit 0; }
+          for c in {{ gha_runner_container | quote }} {{ gha_runner_docker_container | quote }}; do
+            "$p" container exists "$c" && "$p" rm -f "$c" >/dev/null && echo "removed $c"
+          done
+          "$p" network exists {{ gha_runner_network | quote }} && "$p" network rm {{ gha_runner_network | quote }} >/dev/null && echo "removed network"
+          "$p" volume exists {{ gha_runner_state_volume | quote }} && "$p" volume rm {{ gha_runner_state_volume | quote }} >/dev/null && echo "removed state"
+          true
+        executable: /bin/bash
+      register: _u_gha_rm
+      changed_when: "'removed' in _u_gha_rm.stdout"
+
+    - name: DATA=1：Docker 的資料與映像
+      ansible.builtin.shell:
+        cmd: |
+          p={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+          "$p" volume exists {{ gha_runner_docker_volume | quote }} && "$p" volume rm {{ gha_runner_docker_volume | quote }} >/dev/null && echo removed
+          "$p" images --format '{{ '{{' }}.Repository{{ '}}' }}:{{ '{{' }}.Tag{{ '}}' }}' | grep -E '^({{ gha_runner_image }}|{{ gha_runner_docker_image | regex_replace(':.*$', '') }}):' \
+            | while read -r i; do "$p" rmi "$i" >/dev/null 2>&1 && echo "removed $i"; done
+          true
+        executable: /bin/bash
+      register: _u_gha_data
+      changed_when: "'removed' in _u_gha_data.stdout"
+      when: mac_node_uninstall_data | bool
+
+    - name: 執行器 —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['gha-runner'] }}"
+
+    - name: 執行器 —— 提醒
+      ansible.builtin.debug:
+        msg: >-
+          {{ gha_runner_repo }} 的 repo 變數（jury 是 JURY_RUNNER）還指著自架執行器的話，工作會排隊等它。
+          要回到 GitHub 的機器：gh variable delete JURY_RUNNER -R {{ gha_runner_repo }}
+
 # ---- podman ------------------------------------------------------------------
 - name: podman
   tags: [podman]
   block:
+    # 執行器跑在 podman 裡：拆 podman 會讓它斷線。要一起拆就兩個都點名。
+    - name: 執行器還在就拒絕
+      ansible.builtin.stat:
+        path: "{{ _u_home }}/Library/LaunchAgents/{{ gha_runner_label }}.plist"
+      register: _u_podman_gha
+
+    - name: 執行器還在就拒絕 —— 判斷
+      ansible.builtin.assert:
+        that: not _u_podman_gha.stat.exists or 'gha-runner' in ansible_run_tags
+        fail_msg: "GitHub Actions 自架執行器還在 podman 裡跑。要一起拆：make uninstall TAGS=gha-runner,podman"
+        quiet: true
+
     - name: podman 在不在
       ansible.builtin.stat:
         path: "{{ mac_node_brew_prefix }}/bin/podman"

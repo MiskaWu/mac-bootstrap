@@ -36,6 +36,7 @@ TAGS 可以一次給多個：`TAGS=go,node`。碰到 system 層（`hostname`、`
 |---|---|
 | Remote Control | `claude`、`tmux`、`claude-rc`（含 `claude-rc-entry`：替單一專案臨時開關起點） |
 | GUI App | `claude-desktop`、`chrome`、`chrome-remote-desktop`（確認在，不在才裝；移除手動） |
+| CI | `gha-runner`（GitHub Actions 自架執行器，跑在 podman 裡、常駐） |
 | Claude 的整台電腦層（sudo） | `claude-md`（這台的規矩）、`claude-guard`（要裝東西先問） |
 | 連線與身分 | `tailscale`、`authorized-keys`、`ssh-keys`、`git-identity`、`sshd` |
 | 常駐節點 | `power`、`softwareupdate`、`hostname`、`arrive-home` |

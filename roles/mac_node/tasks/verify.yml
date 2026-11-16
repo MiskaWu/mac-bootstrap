@@ -390,6 +390,21 @@
         echo "有（root 所有）"
 
     # 規則用 plutil 讀（JSON 也吃），輸出的 / 會跳脫成 \/，比對前換回來。
+    # 裝了才檢查（LaunchAgent 在）：兩個容器在跑、GitHub 上看得到它在線。
+    - name: "GitHub Actions 自架執行器在線"
+      level: fail
+      cmd: |
+        [ -f {{ (mac_node_home ~ '/Library/LaunchAgents/' ~ gha_runner_label ~ '.plist') | quote }} ] || { echo "沒裝（make install TAGS=gha-runner）"; exit 0; }
+        p={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+        for c in {{ gha_runner_docker_container | quote }} {{ gha_runner_container | quote }}; do
+          r=$("$p" inspect "$c" --format '{{ '{{' }}.State.Running{{ '}}' }}' 2>/dev/null || echo missing)
+          [ "$r" = true ] || { echo "容器 ${c} 沒在跑（${r}）；LaunchAgent 5 分鐘內會拉起來，或 make install TAGS=gha-runner"; exit 1; }
+        done
+        s=$({{ (mac_node_brew_prefix ~ '/bin/gh') | quote }} api repos/{{ gha_runner_repo }}/actions/runners --jq '.runners[] | select(.name == "{{ gha_runner_name }}") | "\(.status) busy=\(.busy)"' 2>/dev/null || true)
+        [ -n "$s" ] || { echo "GitHub 上沒有 {{ gha_runner_name }} 這台（gh 沒登入，或被註銷了）"; exit 1; }
+        [[ $s == online* ]] || { echo "GitHub 上是 ${s}"; exit 1; }
+        echo "{{ gha_runner_repo }}：${s}"
+
     - name: "要裝東西先問（整台電腦層的 managed-settings.d）"
       level: warn
       cmd: |

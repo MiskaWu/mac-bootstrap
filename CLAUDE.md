@@ -53,6 +53,7 @@ mac-bootstrap/
 | `tmux` | user | brew | brew 移除（claude-rc 還在就拒絕） |
 | `claude` | user | 官方 installer → `~/.local/bin/claude` | 刪入口與 `~/.local/share/claude`；`~/.claude` 永遠保留（claude-rc 還在就拒絕） |
 | `claude-rc` | user | Remote Control：啟動腳本 + LaunchAgent + tmux（自動帶 tmux、claude、profile）；另有 `~/bin/claude-rc-entry open|close|list <專案>` 替單一專案臨時開關起點（從那裡開的對話才會載入專案自己的記憶） | bootout、關 tmux、刪 plist 與腳本；DATA=1 刪 log |
+| `gha-runner` | user | GitHub Actions 自架執行器（`gha_runner_repo`，目前是 jury）：podman 裡兩個容器（`docker:dind` 給 buildx、Debian trixie 的執行器映像 `files/gha-runner/`），用 `gh` 取一小時的註冊權杖、只進一次性的容器；LaunchAgent 每 5 分鐘確保 podman machine 與容器在跑，**podman machine 因此常駐** | 先用 `gh` 從 GitHub 註銷，再拆容器、網路、LaunchAgent；DATA=1 刪 Docker 的資料與映像。repo 變數（JURY_RUNNER）不動，報告會提醒 |
 | `claude-desktop` / `chrome` | user | 確認 App 在；不在才用 brew cask 裝（新機器用）。已經裝著的不動、不交給 brew 接管（App 自己會更新，版本對不上） | 手動（Makefile 印步驟） |
 | `chrome-remote-desktop` | user | 只檢查主機程式在不在（cask 是 .pkg、要 sudo，手動裝）。從外面過登入畫面的補救通道 | 手動（Makefile 印步驟） |
 | `tailscale` | user | 只檢查 GUI 版裝了沒（cask 是 .pkg、要 sudo，手動裝） | 手動（Makefile 印步驟） |

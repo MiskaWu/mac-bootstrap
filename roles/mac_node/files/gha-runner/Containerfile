@@ -1,0 +1,35 @@
+# GitHub Actions 自架執行器的映像（mac-bootstrap 的 gha-runner tag 建它）。跑在 podman machine 裡。
+#
+# 基底用 Debian trixie，不用 GitHub 官方的 actions-runner 映像（Ubuntu）：jury 的測試要 chromium-headless-shell，
+# 它只有 Debian 有 arm64 的套件；這也跟 jury 本機測試的 scripts/test.Containerfile 同一個系統。
+# 套件照 jury 的 deploy/README.md「自架執行器」與 jury 主線 2026-11-17 的補充：git、make、jq、Python 3.11 以上、
+# bash 4 以上、GNU coreutils／findutils、util-linux（flock、setsid）、chromium-headless-shell。Go 由 actions/setup-go 照 go.mod 裝。
+# Docker 只放用戶端與 buildx：引擎是另一個容器（docker:dind），經 DOCKER_HOST 連過去。
+ARG RUNNER_VERSION
+ARG RUNNER_SHA256
+FROM docker.io/library/docker:cli AS dockercli
+FROM docker.io/docker/buildx-bin:latest AS buildx
+FROM docker.io/library/debian:trixie-slim
+ARG RUNNER_VERSION
+ARG RUNNER_SHA256
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl git make jq python3 bash coreutils findutils util-linux procps \
+      tar gzip xz-utils unzip zstd openssh-client chromium-headless-shell \
+      libicu76 libkrb5-3 zlib1g libssl3t64 \
+ && rm -rf /var/lib/apt/lists/* \
+ && git config --system --add safe.directory '*' \
+ && useradd -m -u 1001 -s /bin/bash runner
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=buildx /buildx /usr/libexec/docker/cli-plugins/docker-buildx
+# 執行器程式：官方 release，對 release 頁上的 sha256 驗證
+RUN mkdir -p /opt/actions-runner && cd /opt/actions-runner \
+ && curl -fsSL -o runner.tgz "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-arm64-${RUNNER_VERSION}.tar.gz" \
+ && echo "${RUNNER_SHA256}  runner.tgz" | sha256sum -c - \
+ && tar xzf runner.tgz && rm runner.tgz \
+ && chown -R runner:runner /opt/actions-runner
+COPY entrypoint.sh /usr/local/bin/gha-runner-entrypoint
+ENV JURY_TEST_CHROME=/usr/bin/chromium-headless-shell
+USER runner
+WORKDIR /opt/actions-runner
+ENTRYPOINT ["/usr/local/bin/gha-runner-entrypoint"]

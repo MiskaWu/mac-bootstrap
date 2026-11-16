@@ -1,0 +1,27 @@
+#!/bin/zsh
+# {{ ansible_managed }}
+# 來源：mac-bootstrap（TAGS=gha-runner）。改這裡沒用，改 repo 再 make install TAGS=gha-runner。
+#
+# 由 LaunchAgent {{ gha_runner_label }} 在登入時與之後每 5 分鐘呼叫。冪等：都在跑就什麼都不做。
+# 讓 GitHub Actions 自架執行器一直在線：podman machine 開著、Docker 引擎與執行器兩個容器在跑。
+# 這台的 podman machine 因此常駐（原本的規矩是「用之前開、用完關」，有執行器之後不再關）。
+set -u
+P={{ (mac_node_brew_prefix ~ '/bin/podman') | quote }}
+M={{ podman_machine_name | quote }}
+log() { echo "[$(date '+%F %T')] $*"; }
+
+[[ -x "$P" ]] || { log "沒有 podman"; exit 1; }
+state=$("$P" machine inspect "$M" --format '{{ '{{' }}.State{{ '}}' }}' 2>/dev/null || echo missing)
+case "$state" in
+  running) ;;
+  missing) log "podman machine $M 不在"; exit 1 ;;
+  *) log "podman machine 是 ${state}，開機"; "$P" machine start "$M" >/dev/null 2>&1 || { log "開機失敗"; exit 1; } ;;
+esac
+for c in {{ gha_runner_docker_container | quote }} {{ gha_runner_container | quote }}; do
+  running=$("$P" inspect "$c" --format '{{ '{{' }}.State.Running{{ '}}' }}' 2>/dev/null || echo missing)
+  case "$running" in
+    true) ;;
+    missing) log "容器 $c 不在（make install TAGS=gha-runner）"; exit 1 ;;
+    *) log "啟動 $c"; "$P" start "$c" >/dev/null ;;
+  esac
+done

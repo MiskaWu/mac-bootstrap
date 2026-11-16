@@ -92,7 +92,7 @@
 
 - name: podman（brew，machine 只建不啟動）
   ansible.builtin.import_tasks: podman.yml
-  tags: [user, podman, docker-compat]
+  tags: [user, podman, docker-compat, gha-runner]
 
 - name: Docker 相容（podman compose 的 provider、docker → podman 的 shim）
   ansible.builtin.import_tasks: docker-compat.yml
@@ -131,6 +131,10 @@
 - name: GitHub CLI（brew）
   ansible.builtin.import_tasks: gh.yml
   tags: [user, gh]
+
+- name: GitHub Actions 自架執行器（podman 裡的兩個容器 + LaunchAgent）
+  ansible.builtin.import_tasks: gha-runner.yml
+  tags: [user, gha-runner]
 
 - name: just（brew；專案的入口指令）
   ansible.builtin.import_tasks: just.yml
