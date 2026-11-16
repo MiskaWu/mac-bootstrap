@@ -74,3 +74,9 @@ arrive_home_urls: []
 # 要並存的版本（官方 release tag 去掉 -stable）。列幾個裝幾個，拿掉的會被刪。
 # 不填就用 defaults 的最新一版。`godot` 指令指向 godot_default_version（預設是清單最後一個）。
 # godot_versions: ["4.6.3", "4.7.2"]
+
+# ---- Codex CLI（TAGS=codex）------------------------------------------------
+# 版本 pin 在 defaults（跟 Linux 那台同一版）。只有這台要用別的版本才在這裡覆蓋。
+# 裝的是官方的完整套件（codex-package-*），對那個 release 公布的 codex-package_SHA256SUMS 驗證，
+# 所以只要給版本號。換了再 make install TAGS=codex：裝新版、切 symlink、刪舊版目錄。
+# codex_version: "0.169.0"

@@ -171,6 +171,54 @@ godot_default_version: "{{ godot_versions | last }}"
 godot_release_url: https://github.com/godotengine/godot/releases/download
 godot_app_dir: "{{ mac_node_home }}/Applications"
 
+# ---- Codex CLI（tasks/codex.yml）----------------------------------------------
+# OpenAI 官方的 Codex CLI，easel（github.com/MiskaWu/easel）用它生圖。明確 pin：跟 Linux 那台同一版，
+# 2026-11-06 和 easel 一起驗過。改版本號再 make install TAGS=codex：裝新版、切 symlink、刪舊版目錄。
+codex_version: "0.167.0"
+# release tag 是 rust-v<版本>。裝的是完整套件 codex-package-*（官方 install.sh 與 brew cask 裝的也是它），
+# 對同一個 release 公布的 codex-package_SHA256SUMS 驗證（同 node、godot）。
+# 不能換成只有一個執行檔的 codex-aarch64-apple-darwin.tar.gz：理由見 tasks/codex.yml 檔頭。
+codex_release_url: "https://github.com/openai/codex/releases/download/rust-v{{ codex_version }}"
+codex_asset: codex-package-aarch64-apple-darwin
+codex_checksums_asset: codex-package_SHA256SUMS
+# 整包放這裡（同 node 的 ~/.local/node-<版本>），~/.local/bin/codex 是連到裡面 bin/codex 的 symlink。
+mac_node_codex_pkg_dir: "{{ mac_node_home }}/.local/codex-{{ codex_version }}"
+mac_node_codex_bin: "{{ mac_node_home }}/.local/bin/codex"
+# 套件裡一定要有的檔（相對於套件根目錄）。「裝了沒」與「解開後對不對」都看這份。
+codex_package_required:
+  - bin/codex
+  - bin/codex-code-mode-host
+  - codex-path/rg
+  - codex-package.json
+
+# 下面兩段 bash 是「codex 能不能用」的檢查，安裝後的斷言（tasks/codex.yml）與 make verify 用同一段，
+# 不各寫一份 —— 之前的洞就是只看 `codex --version`，沒看 easel 真正要的東西在不在。
+#
+# (1) 讀版本。codex 每次執行（連 --version）都會在解析參數之前先建出 $CODEX_HOME/tmp/arg0-macos
+#     （codex-rs/arg0/src/lib.rs），所以給它一個用完即丟的 CODEX_HOME，不碰 ~/.codex。
+mac_node_codex_version_probe: |
+  t=$(/usr/bin/mktemp -d) || exit 1
+  CODEX_HOME="$t" {{ mac_node_codex_bin | quote }} --version
+  rc=$?
+  /bin/rm -rf "${t:?}"
+  exit $rc
+# (2) 照 codex 自己的規則找 codex-code-mode-host（codex-rs/install-context/src/lib.rs）：把執行檔的路徑
+#     解到底（symlink 會解開）→ 所在目錄叫 bin、上一層有 codex-package.json 才算套件配置 →
+#     先找 codex-resources/codex-code-mode-host，再找 bin/codex-code-mode-host。
+#     image_gen 走 code mode，找不到這支就生不了圖。成功印出它的路徑；失敗印原因並 exit 1。
+#     最後跑一次 --help：它的 main() 第一步就是解析參數，不會動任何東西，只確認這支真的起得來。
+mac_node_codex_host_probe: |
+  c={{ mac_node_codex_bin | quote }}
+  want={{ mac_node_codex_pkg_dir | quote }}
+  real=$(/bin/realpath "$c" 2>/dev/null) || { echo "找不到 ${c}"; exit 1; }
+  bin=${real%/*}; pkg=${bin%/*}
+  [ "${bin##*/}" = bin ] && [ -f "$pkg/codex-package.json" ] || { echo "codex 不在套件配置裡（${real}）：只有一個執行檔時沒有 codex-code-mode-host，image_gen 會失敗"; exit 1; }
+  [ "$pkg" = "$(/bin/realpath "$want" 2>/dev/null)" ] || { echo "codex 連到 ${pkg}，不是 pin 的 ${want}"; exit 1; }
+  h="$pkg/codex-resources/codex-code-mode-host"; [ -f "$h" ] || h="$bin/codex-code-mode-host"
+  [ -f "$h" ] && [ -x "$h" ] || { echo "沒有可執行的 ${h}：code mode 起不來，image_gen 會失敗"; exit 1; }
+  "$h" --help >/dev/null 2>&1 || { echo "${h} 跑不起來"; exit 1; }
+  echo "$h"
+
 # ---- 移除（make uninstall）---------------------------------------------------
 # DATA=1 → -e mac_node_uninstall_data=true：連快取、下載的 runtime、VM 磁碟一起刪。
 mac_node_uninstall_data: false
@@ -183,7 +231,7 @@ arrive_home_urls: []
 # brew 上「允許存在」的頂層套件。多出來的 make verify 會列出來（只報告，不移除）。
 # 來源：make 由 bootstrap.sh 裝、ansible 由 Makefile 裝、其餘由各自的 task 檔裝。
 # 加一個 brew 套件的 task 時，回來這裡補一行。
-mac_node_brew_allowed_formulae: [make, ansible, tmux, go, uv, pnpm, podman, docker-compose]
+mac_node_brew_allowed_formulae: [make, ansible, tmux, go, uv, pnpm, podman, docker-compose, bash, awscli, gh]
 mac_node_brew_allowed_casks: ["{{ mac_node_tailscale_cask }}"]
 
 # brew 以外「允許存在」的東西。比對用 bash 的 glob（可以寫 *）。同樣只報告、不移除。
@@ -212,6 +260,7 @@ mac_node_allowed_launchd:
 # 使用者的執行檔目錄。curl | sh 的安裝程式最常把東西丟在這裡。
 mac_node_allowed_user_bins:
   - .local/bin/claude                         # claude
+  - .local/bin/codex                          # codex（官方 release 的單一執行檔）
   - .local/bin/docker                         # docker-compat（exec podman 的 shim）
   - .local/bin/godot                          # godot
   - .local/bin/godot-*                        # godot（每個版本一個）

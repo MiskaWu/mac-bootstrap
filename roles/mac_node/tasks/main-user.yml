@@ -85,12 +85,34 @@
   ansible.builtin.import_tasks: godot.yml
   tags: [user, godot]
 
+# ---- easel 的前置工具（github.com/MiskaWu/easel）------------------------------
+# easel 直接在主機上呼叫 codex 生圖；縮圖在 macOS 用內建的 sips，所以只需要 codex。
+# 掛在 profile 那行：codex 在 ~/.local/bin，要靠 env.zsh 把它放進 PATH。
+- name: Codex CLI（官方 release，pin 版本與 sha256）
+  ansible.builtin.import_tasks: codex.yml
+  tags: [user, codex]
+
+# ---- 命令列工具（brew）--------------------------------------------------------
+# 專案腳本要用、又沒有「專案自己宣告版本」機制的工具。都掛在 profile 那行：bash 5 要靠
+# env.zsh 把 /opt/homebrew/bin 排在 /bin 前面才蓋得過 /bin/bash 3.2。
+- name: bash 5（brew；靠 PATH 順序蓋過 /bin/bash 3.2）
+  ansible.builtin.import_tasks: bash.yml
+  tags: [user, bash]
+
+- name: AWS CLI v2（brew）
+  ansible.builtin.import_tasks: awscli.yml
+  tags: [user, awscli]
+
+- name: GitHub CLI（brew）
+  ansible.builtin.import_tasks: gh.yml
+  tags: [user, gh]
+
 # ---- 收尾 -------------------------------------------------------------------
 # profile 放在 claude-rc 前面：伺服器啟動時 PATH 必須已經對。
 # 內容看機器上實際有什麼（stat），不看開關。
 - name: PATH 環境設定（~/.zshenv + ~/.zprofile）
   ansible.builtin.import_tasks: profile.yml
-  tags: [user, profile, tmux, claude, claude-rc, go, python, node, pnpm, rust, podman, docker-compat, godot]
+  tags: [user, profile, tmux, claude, claude-rc, go, python, node, pnpm, rust, podman, docker-compat, godot, codex, bash, awscli, gh]
 
 - name: Remote Control 常駐伺服器
   ansible.builtin.import_tasks: claude-rc.yml

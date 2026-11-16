@@ -40,6 +40,8 @@ TAGS 可以一次給多個：`TAGS=go,node`。碰到 system 層（`hostname`、`
 | 常駐節點 | `power`、`softwareupdate`、`hostname`、`arrive-home` |
 | 語言與容器 | `go`、`python`（只有 uv）、`node`、`pnpm`、`rust`、`podman`、`docker-compat` |
 | 遊戲引擎 | `godot`（多版本並存） |
+| easel 的前置工具 | `codex`（OpenAI 官方 Codex CLI 的完整套件，pin 版本，放在 `~/.local/codex-<版本>`；只放一個執行檔的單檔版生不了圖）。easel 在 macOS 用內建 sips 做縮圖，只需要 codex |
+| 命令列工具 | `bash`（brew 的 5.x，`#!/usr/bin/env bash` 會拿到它）、`awscli`、`gh` |
 | 環境 | `profile`（PATH，由其他 tag 自動帶） |
 
 語言的原則：**不裝通用版本管理器**。專案自己宣告版本，交給語言自己的機制下載：
@@ -68,7 +70,7 @@ make uninstall TAGS=go,node DATA=1     # 連快取、模組、下載的東西一
 make uninstall TAGS=claude-rc,claude   # 有相依的要一起點名，不然會被擋
 ```
 
-不會被刪的：`~/.claude`（設定、對話紀錄）、私鑰、`~/.cargo/config.toml` 和 `credentials.toml`。報告裡會列出來。
+不會被刪的：`~/.claude`（設定、對話紀錄）、私鑰、`~/.cargo/config.toml` 和 `credentials.toml`、`~/.aws/config` 和 `credentials`、`~/.config/gh`（gh 的登入）、`~/.codex` 裡的 `auth.json`（Codex 的登入）、`config.toml`、`AGENTS.md`、`.env`、`sessions`（對話紀錄）。報告裡會列出來。
 
 不能自動移除的：`tailscale`（.pkg，要 sudo）、`hostname`（改 config 再 install）。對它們下 `make uninstall` 會印出手動步驟。
 
@@ -89,3 +91,5 @@ make uninstall TAGS=claude-rc,claude   # 有相依的要一起點名，不然會
    回答開啟與信任，用手機確認看得到之後按 Ctrl+C，再 `make install TAGS=claude-rc`。
 4. 把 `make install TAGS=ssh-keys` 印出來的公鑰貼到 GitHub。別台機器的公鑰放進 `config.yml` 的 `ssh_authorized_keys`。
 5. 用金鑰從別台登入成功之後，才 `make install TAGS=sshd`。這一步會關掉密碼登入。
+6. 裝了 `awscli`、`gh` 的話：`aws configure sso`（或從別台搬 `~/.aws/config`）再 `aws sso login --profile <名字>`；`gh auth login`。
+7. 裝了 `codex` 的話：`codex login`（ChatGPT 帳號）。用 easel 的話也可以不先登入，第一次開面板時它會帶你用裝置碼登入。

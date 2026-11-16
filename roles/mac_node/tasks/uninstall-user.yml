@@ -159,6 +159,200 @@
       ansible.builtin.set_fact:
         _uninstall_done: "{{ _uninstall_done + ['git-identity'] }}"
 
+# ---- 命令列工具：gh、AWS CLI、bash --------------------------------------------
+# 登入狀態照 ssh-keys 私鑰的保守做法：**設定與長期的秘密永遠不自動刪，DATA=1 也不刪**。
+# 理由同私鑰：刪本機的檔不會讓對方那邊的授權失效（GitHub 上的 OAuth 授權、IAM 的 access key
+# 照樣有效），只會少掉「這台登入過什麼」的線索，而且刪錯沒有退路。要清就先到對方撤銷，再自己刪。
+# DATA=1 只刪「重新登入就會再生」的暫時 token 與快取：它們本來就會過期，刪掉的代價只是再登入一次。
+# 不在這裡跑 gh auth logout / aws sso logout：那是帳號端的動作（會呼叫 GitHub / AWS），由你決定。
+- name: GitHub CLI
+  tags: [gh]
+  block:
+    - name: brew uninstall gh
+      community.general.homebrew:
+        name: gh
+        state: absent
+
+    - name: gh —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['gh'] }}"
+        _uninstall_brew: true
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+        _uninstall_keep: "{{ _uninstall_keep + _k }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/.local/share/gh"
+            what: gh extension install 裝的擴充（gh 的全域安裝）
+          - path: "{{ _u_home }}/.local/state/gh"
+            what: gh 的狀態檔（檢查更新的時間）
+          - path: "{{ _u_home }}/.cache/gh"
+            what: gh 的 API 快取
+        _k:
+          - path: "{{ _u_home }}/.config/gh"
+            what: gh 的設定與登入紀錄（token 在鑰匙圈的 gh:github.com，鑰匙圈不能用時在 hosts.yml）—— DATA=1 也不會動。要清：先到 GitHub 的 Settings → Applications 撤銷 GitHub CLI，再自己刪這個目錄與鑰匙圈項目
+
+- name: AWS CLI
+  tags: [awscli]
+  block:
+    - name: brew uninstall awscli
+      community.general.homebrew:
+        name: awscli
+        state: absent
+
+    # rmdir 只收空目錄：DATA=1 刪掉快取後 sso/、cli/ 通常空了；~/.aws 還有 config 就留著。
+    - name: awscli —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['awscli'] }}"
+        _uninstall_brew: true
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+        _uninstall_keep: "{{ _uninstall_keep + _k }}"
+        _uninstall_rmdir: "{{ _uninstall_rmdir + [_u_home ~ '/.aws/sso', _u_home ~ '/.aws/cli', _u_home ~ '/.aws'] }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/.aws/sso/cache"
+            what: aws sso login 拿到的暫時 token（會自己過期；刪了只是要重新登入）
+          - path: "{{ _u_home }}/.aws/cli/cache"
+            what: 用 SSO 換來的暫時憑證（會自己過期；刪了只是要重新登入）
+        _k:
+          - path: "{{ _u_home }}/.aws/config"
+            what: 你的 profile 與 SSO 設定（aws configure sso 寫的）—— DATA=1 也不會動
+          - path: "{{ _u_home }}/.aws/credentials"
+            what: 長期的 access key —— DATA=1 也不會動。要清：先到 IAM 停用或刪掉那把 key，再自己刪
+
+- name: bash（brew）
+  tags: [bash]
+  block:
+    # 登入 shell 指到 brew 的 bash 時把它移掉，終端機與 ssh 都會開不起來（同 authorized-keys 的防鎖死）。
+    # 這個 repo 不會這樣設（bash.yml 不 chsh），防的是手動改過的情況。
+    - name: 防呆：登入 shell 是 brew 的 bash 就不移除
+      ansible.builtin.assert:
+        that: not (ansible_facts.user_shell.startswith(mac_node_brew_prefix ~ '/') and ansible_facts.user_shell.endswith('/bash'))
+        fail_msg: >-
+          登入 shell 是 {{ ansible_facts.user_shell }}，移除後終端機與 ssh 都開不起來。
+          先 chsh -s /bin/zsh，再移除。bash 沒有動。
+        quiet: true
+
+    - name: brew uninstall bash
+      community.general.homebrew:
+        name: bash
+        state: absent
+
+    # 沒有自己的資料：~/.bash_history、~/.bashrc 跟 /bin/bash 3.2 共用，不是這個 tag 的。
+    - name: bash —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['bash'] }}"
+        _uninstall_brew: true
+
+# ---- Codex CLI ---------------------------------------------------------------
+# 工具本體是 ~/.local/codex-<版本>（整包套件）加 ~/.local/bin/codex 這個連過去的 symlink，兩個都刪。
+# ~/.codex 不是工具的一部分，但它是「混住」的（同 ~/.cargo）：登入憑證、你的設定、對話紀錄、
+# 生出來的圖都在裡面，所以拆開處置（同 rust）：
+#   - 登入憑證、設定、你寫的全域指示、對話紀錄：永遠不自動刪，DATA=1 也不刪（同 cargo 的
+#     credentials / config，對話紀錄同 claude 的 ~/.claude）。easel 改圖要接回原本的 Codex 對話，
+#     sessions 刪了就接不回去。刪本機的 auth.json 不會讓 ChatGPT 那邊的登入失效，要登出就在
+#     移除**之前**跑 codex logout。
+#   - 生出來的圖、輸入紀錄、log、快取、暫存：資料，DATA=1 才刪。
+#   - 其餘沒列到的不動，但會印出來。下面兩份清單只列確定的幾項：Codex 自己還會放別的狀態檔
+#     （0.167.0 實際看到的有 state_5.sqlite、thread_history_1.sqlite、logs_2.sqlite、plugins、skills…），
+#     版本不同也不一樣。其中 *.sqlite 是對話的索引與歷史，接回對話可能用得到，刻意不列進會刪的那份。
+#     確定不要的就補進 _u_codex_data。
+- name: Codex CLI
+  tags: [codex]
+  vars:
+    _u_codex_keep:
+      - path: "{{ _u_home }}/.codex/auth.json"
+        what: ChatGPT 的登入憑證 —— DATA=1 也不會動。要登出：移除前先跑 codex logout
+      - path: "{{ _u_home }}/.codex/config.toml"
+        what: 你的 Codex 設定 —— DATA=1 也不會動
+      - path: "{{ _u_home }}/.codex/AGENTS.md"
+        what: 你寫給 Codex 的全域指示 —— DATA=1 也不會動
+      - path: "{{ _u_home }}/.codex/.env"
+        what: 你放給 Codex 的環境變數 —— DATA=1 也不會動
+      - path: "{{ _u_home }}/.codex/sessions"
+        what: Codex 的對話紀錄（easel 改圖要接回原本的對話，刪了就接不回去）—— DATA=1 也不會動
+    _u_codex_data:
+      - path: "{{ _u_home }}/.codex/generated_images"
+        what: Codex 生出來的圖（easel 從這裡收圖）
+      - path: "{{ _u_home }}/.codex/history.jsonl"
+        what: Codex 的輸入紀錄
+      - path: "{{ _u_home }}/.codex/log"
+        what: Codex 的 log
+      - path: "{{ _u_home }}/.codex/cache"
+        what: Codex 的快取
+      - path: "{{ _u_home }}/.codex/models_cache.json"
+        what: Codex 的模型清單快取
+      - path: "{{ _u_home }}/.codex/tmp"
+        what: Codex 每次執行都會建的暫存（tmp/arg0-macos）
+  block:
+    - name: ~/.local/bin/codex 是什麼
+      ansible.builtin.stat:
+        path: "{{ _u_home }}/.local/bin/codex"
+      register: _u_codex_bin
+
+    # 只刪自己放的：指進 ~/.local/codex-<版本> 的 symlink，或這個 tag 早期單檔版留下的一般檔案。
+    # 指到別處的 symlink 是別的方式裝的（官方 install.sh 之類），留著並報告。
+    - name: ~/.local/bin/codex 是不是這裡放的
+      ansible.builtin.set_fact:
+        _u_codex_ours: >-
+          {{ _u_codex_bin.stat.exists
+             and (_u_codex_bin.stat.isreg
+                  or (_u_codex_bin.stat.lnk_target | default('')).startswith(_u_home ~ '/.local/codex-')) }}
+
+    - name: 刪 ~/.local/bin/codex
+      ansible.builtin.file:
+        path: "{{ _u_home }}/.local/bin/codex"
+        state: absent
+      when: _u_codex_ours | bool
+
+    - name: 不是這裡放的就不動
+      ansible.builtin.debug:
+        msg: "~/.local/bin/codex 是 symlink（→ {{ _u_codex_bin.stat.lnk_target | default('?') }}），不是 mac-bootstrap 放的，沒有刪。"
+      when: _u_codex_bin.stat.exists and not (_u_codex_ours | bool)
+
+    # 只認「codex-<x.y.z>」這種名字（同安裝端），免得誤刪 ~/.local 裡別的東西。
+    - name: 找所有版本的套件目錄（~/.local/codex-<版本>）
+      ansible.builtin.find:
+        paths: "{{ _u_home }}/.local"
+        patterns: '^codex-[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.]+)?$'
+        use_regex: true
+        file_type: directory
+      register: _u_codex_dirs
+
+    # 附屬程式（codex-code-mode-host、rg…）都在套件目錄裡，跟著一起走。
+    - name: 刪套件目錄
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ _u_codex_dirs.files | map(attribute='path') | list }}"
+      loop_control:
+        label: "{{ item | basename }}"
+
+    - name: ~/.codex 裡有什麼
+      ansible.builtin.find:
+        paths: "{{ _u_home }}/.codex"
+        file_type: any
+        hidden: true
+      register: _u_codex_home
+
+    - name: ~/.codex 裡不在清單上的（不動，只報告）
+      ansible.builtin.debug:
+        msg: >-
+          ~/.codex 裡這些不在清單上，DATA=1 也不會動：{{ _u_codex_other | join('、') }}。
+          確定是 Codex 自己的狀態檔、不要了，就自己刪，或補進 uninstall-user.yml 的 _u_codex_data。
+      vars:
+        _u_codex_other: >-
+          {{ _u_codex_home.files | map(attribute='path')
+             | difference((_u_codex_keep + _u_codex_data) | map(attribute='path')) | map('basename') | sort }}
+      when: _u_codex_other | length > 0
+
+    # rmdir 只收空目錄：~/.codex 裡還有登入憑證、設定或沒列到的檔就留著。
+    - name: Codex CLI —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['codex'] }}"
+        _uninstall_rmdir: "{{ _uninstall_rmdir + [_u_home ~ '/.codex'] }}"
+        _uninstall_data: "{{ _uninstall_data + _u_codex_data }}"
+        _uninstall_keep: "{{ _uninstall_keep + _u_codex_keep }}"
+
 # ---- Godot -------------------------------------------------------------------
 - name: Godot
   tags: [godot]

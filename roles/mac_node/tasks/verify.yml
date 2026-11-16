@@ -198,6 +198,12 @@
         [ -x "$HOME/.local/bin/docker" ] && want="$want docker"
         [ -x "$b/docker-compose" ] && want="$want docker-compose"
         [ -L "$HOME/.local/bin/godot" ] && want="$want godot"
+        # easel 的前置工具（TAGS=codex）
+        [ -x {{ mac_node_codex_bin | quote }} ] && want="$want codex"
+        # 命令列工具（TAGS=bash / awscli / gh）
+        [ -x "$b/bash" ] && want="$want bash"
+        [ -x "$b/aws" ] && want="$want aws"
+        [ -x "$b/gh" ] && want="$want gh"
         bad=""
         for mode in ssh launchd; do
           flag=""; [ $mode = launchd ] && flag="-l"
@@ -206,6 +212,9 @@
             [ -n "$p" ] || { bad="$bad $mode:$c"; continue; }
             # make 一定要是 GNU 4.x，不能是 /usr/bin/make（path_helper 重排的那個坑）
             if [ $c = make ] && [ "$p" = /usr/bin/make ]; then bad="$bad $mode:make=3.81"; fi
+            # bash 一定要是 brew 的 5.x，不能是 /bin/bash（3.2）：TAGS=bash 不改 shebang，
+            # 靠 env.zsh 把 brew 排在 /bin 前面，#!/usr/bin/env bash 才拿得到
+            if [ $c = bash ] && [ "$p" != "$b/bash" ]; then bad="$bad $mode:bash=${p}"; fi
           done
         done
         [ -z "$bad" ] || { echo "拿不到或拿錯：$bad"; exit 1; }
@@ -267,6 +276,78 @@
         [ -z "$bad" ] || { echo "不對：$bad"; exit 1; }
         [ -n "$out" ] || { echo "沒有裝任何語言工具"; exit 0; }
         echo "${out# }"
+
+    # TAGS=codex（easel 的前置工具；縮圖在 macOS 用內建的 sips，所以只有這一個）。沒裝回 0 並註明，不算失敗。
+    # 只看 `codex --version` 不夠：只有一個執行檔的單檔版 --version 正常，卻因為沒有 codex-code-mode-host
+    # 而生不了圖（2026-11-16 實測）。所以這裡看兩件事：版本，以及「照 codex 自己的規則找得到、起得來的
+    # codex-code-mode-host」。兩段檢查的內容在 defaults 的 mac_node_codex_*_probe（為什麼那樣寫也在那裡），
+    # 安裝後的斷言用的是同一段，不各寫一份。
+    - name: "easel 的前置工具（codex 與 codex-code-mode-host）"
+      level: fail
+      cmd: |
+        c={{ mac_node_codex_bin | quote }}
+        [ -e "$c" ] || [ -L "$c" ] || { echo "沒有裝 codex"; exit 0; }
+        version_probe() {
+        {{ mac_node_codex_version_probe }}
+        }
+        host_probe() {
+        {{ mac_node_codex_host_probe }}
+        }
+        bad=""
+        cv=$(version_probe 2>/dev/null | tail -1)
+        [ "${cv##* }" = {{ codex_version | quote }} ] || bad="$bad codex=${cv:-跑不起來}（pin 的是 {{ codex_version }}）"
+        hp=$(host_probe 2>/dev/null) || bad="$bad ${hp}"
+        [ -z "$bad" ] || { echo "不對：${bad# }（make install TAGS=codex）"; exit 1; }
+        echo "codex ${cv##* }，code-mode-host 在 ${hp}"
+
+    # TAGS=bash / awscli / gh。不跑 aws、gh 本身：gh 第一次跑任何指令都可能寫出
+    # ~/.config/gh/config.yml（設定版本的遷移；未實測，保守起見），verify 不准有副作用。
+    # 版本從 brew 的連結讀（/opt/homebrew/bin/gh → ../Cellar/gh/<版本>/bin/gh），順便確認是 brew 的。
+    - name: "命令列工具（bash、aws、gh）的版本"
+      level: fail
+      cmd: |
+        b={{ mac_node_brew_prefix | quote }}/bin
+        out=""; bad=""
+        if [ -x "$b/bash" ]; then
+          v=$("$b/bash" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"' 2>/dev/null || true)
+          [ "${v%%.*}" -ge 4 ] 2>/dev/null || bad="$bad bash=${v:-跑不起來}（要 4 以上）"
+          out="$out bash $v"
+        fi
+        for t in aws:awscli gh:gh; do
+          c=${t%%:*}; f=${t#*:}
+          [ -x "$b/$c" ] || continue
+          l=$(/usr/bin/readlink "$b/$c" || true)
+          [[ $l == */Cellar/"$f"/* ]] || { bad="$bad ${c} 不是 brew 的 ${f}（${l:-不是連結}）"; continue; }
+          v=${l#*/Cellar/"$f"/}
+          out="$out $c ${v%%/*}"
+        done
+        [ -z "$bad" ] || { echo "不對：$bad"; exit 1; }
+        [ -n "$out" ] || { echo "沒有裝 bash、aws、gh"; exit 0; }
+        echo "${out# }"
+
+    # 登入是帳號的事（手動），這裡只看設定在不在。token 有沒有過期不看：要連網，而且本來就會過期。
+    - name: "aws、gh 的登入設定（手動）"
+      level: warn
+      cmd: |
+        b={{ mac_node_brew_prefix | quote }}/bin
+        ok=""; miss=""
+        if [ -x "$b/aws" ]; then
+          if /usr/bin/grep -qE '^[[:space:]]*sso_(start_url|session)[[:space:]]*=' "$HOME/.aws/config" 2>/dev/null; then
+            ok="$ok aws（~/.aws/config 有 SSO 設定）"
+          else
+            miss="$miss aws（aws configure sso，或從別台搬 ~/.aws/config）"
+          fi
+        fi
+        if [ -x "$b/gh" ]; then
+          if /usr/bin/grep -q '^github.com:' "$HOME/.config/gh/hosts.yml" 2>/dev/null; then
+            ok="$ok gh（登入過 github.com）"
+          else
+            miss="$miss gh（gh auth login）"
+          fi
+        fi
+        [ -z "$miss" ] || { echo "還沒設定：${miss# }"; exit 1; }
+        [ -n "$ok" ] || { echo "沒有裝 aws、gh"; exit 0; }
+        echo "${ok# }"
 
     # ---- Claude 的整台電腦層（/Library/Application Support/ClaudeCode）----
     - name: "這台的規矩（整台電腦層的 CLAUDE.md）"
@@ -433,8 +514,13 @@
             extra="$extra go:${f##*/}"
           done
         fi
+        # gh extension install 裝的擴充（TAGS=gh）。直接列目錄，不跑 gh extension list（同上，不准有副作用）。
+        for d in "$HOME/.local/share/gh/extensions"/*; do
+          [ -e "$d" ] || continue
+          extra="$extra gh-ext:${d##*/}"
+        done
         [ -z "$extra" ] || { echo "全域裝的：${extra# }（只報告不移除；工具請寫進專案自己的宣告）"; exit 1; }
-        echo "沒有（npm、pnpm、cargo、uv tool、go install 都是空的）"
+        echo "沒有（npm、pnpm、cargo、uv tool、go install、gh extension 都是空的）"
   loop_control:
     label: "{{ item.name }}"
   register: _verify

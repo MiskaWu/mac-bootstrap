@@ -37,6 +37,8 @@ mac-bootstrap/
     │   ├── detect.yml  list.yml  verify.yml        # list / verify 是 [x, never]
     │   ├── tmux  claude  claude-rc  tailscale  git-identity  ssh-keys  authorized-keys
     │   ├── arrive-home  go  python  node  pnpm  rust  podman  docker-compat  godot  claude-md  profile
+    │   ├── codex
+    │   ├── bash  awscli  gh
     │   └── hostname  power  softwareupdate  sshd
     └── templates/  env.zsh.j2  claude-rc-server.sh.j2  local.claude-rc.plist.j2
                     010-hardening.conf.j2  arrive-home.sh.j2  claude-md.j2  docker-shim.sh.j2
@@ -61,6 +63,9 @@ mac-bootstrap/
 | `rust` | user | 官方 rustup-init `--no-modify-path` | 同 Linux 的拆法：`~/.rustup` 整包、`~/.cargo` 拆開；config/credentials 永遠保留 |
 | `docker-compat` | user | brew `docker-compose`（`podman compose` 的 provider）、`~/.local/bin/docker`（`exec podman` 的 shim）、`containers.conf` 關掉 provider 提示。引擎與指令都是 podman | brew 移除、刪 shim（只刪自己放的）、拿掉設定；檔案空了就刪 |
 | `godot` | user | 官方 zip（SHA512-SUMS 驗證）→ `~/Applications/Godot-<版本>.app`；`godot_versions` 列幾個裝幾個，清單外的刪掉；`godot-<版本>` 與 `godot` 指令 | 刪所有版本與指令（Godot 開著就拒絕）；DATA=1 刪編輯器設定與匯出範本 |
+| `codex` | user | OpenAI 官方 release 的完整套件 `codex-package-aarch64-apple-darwin.tar.gz`（tag `rust-v<版本>`，`codex_version` pin，對官方的 `codex-package_SHA256SUMS` 驗證）→ `~/.local/codex-<版本>`，`~/.local/bin/codex` 是連到裡面 `bin/codex` 的 symlink；附屬程式（`codex-code-mode-host`、`rg`）留在套件裡。裝完與 `make verify` 都檢查 `codex-code-mode-host` 在 codex 會去找的位置而且起得來。easel 生圖用（easel 在 macOS 用內建 sips 做縮圖，只需要 codex）。登入是手動的事 | 刪 symlink（只刪自己放的）與所有 `~/.local/codex-<版本>`；`~/.codex` 拆開：`auth.json`、`config.toml`、`AGENTS.md`、`.env`、`sessions`（對話紀錄，easel 改圖要接回去）永遠保留，DATA=1 刪生出來的圖、輸入紀錄、log、快取、暫存；沒列到的不動並印出來 |
+| `bash` | user | brew 的 bash 5。不改 PATH、不改 shebang：靠 `env.zsh` 把 `/opt/homebrew/bin` 排在 `/bin` 前面，`#!/usr/bin/env bash` 就拿到 5.x（`make verify` 檢查 ssh 與 launchd 兩種情境）。寫死 `/bin/bash` 的照舊是 3.2 | brew 移除（登入 shell 是它就拒絕，防鎖死） |
+| `awscli` / `gh` | user | brew。登入是手動的事：`aws configure sso`、`gh auth login` | brew 移除；**登入設定與長期秘密永遠不自動刪**（`~/.aws/config`、`~/.aws/credentials`、`~/.config/gh`，同私鑰的理由）；DATA=1 只刪會自己過期的 SSO token 快取、gh 的擴充與快取 |
 | `claude-guard` | system | 整台電腦層 `/Library/Application Support/ClaudeCode/managed-settings.d/mac-bootstrap.json` 的 `permissions.ask`：安裝類指令與 `sudo`，「指令開頭」與「前面接路徑」兩種寫法各一條 | 刪檔；目錄空了才刪 |
 | `claude-md` | system | 整台電腦層 `/Library/Application Support/ClaudeCode/CLAUDE.md`：只有這台成立的細節（跨電腦的原則在 claude-config 的 `rules/tools-and-versions.md`）。固定文字，不看裝了什麼 | 刪檔；目錄空了才刪 |
 | `profile` | user | `env.zsh`，由 `~/.zshenv` 與 `~/.zprofile` 各 source 一次 | 拿掉兩個 block、刪 env.zsh；rc 檔只剩空白就刪 |
@@ -112,6 +117,8 @@ mac-bootstrap/
 20. **Go 的 `toolchain` 只會往新版切**：go.mod 寫比主機舊的版本不會降版，要舊版得帶 `GOTOOLCHAIN=go1.x.y`。**pnpm 的 devEngines.runtime 只對 `pnpm exec` / `pnpm run` 生效**，直接打 `node` 還是主機的。
 21. **Claude 的規矩與護欄分三層，依「管到誰」放**：每台電腦都成立的放個人層（`~/.claude`，由 claude-config 共用到 Mac、WSL、Windows）；只有這台成立的放整台電腦層（`/Library/Application Support/ClaudeCode/`，這個 repo 的 system 層）；只有某個 repo 成立的放那個 repo。**這個 repo 不准寫 `~/.claude`**（那是共用 repo 的連結）。整台電腦層只用最高的 managed 來源：有 MDM 描述檔或組織後台政策時，這裡的檔會被整個略過。
 22. **護欄規則開頭不要加 `*`**：`Bash(*sudo *)` 連引號裡的文字也比對到（實測 `grep "要 sudo 的"` 被攔）。用「指令開頭」與「`*/` 接路徑」兩種寫法。
+23. **`codex` 每次執行都會寫 `~/.codex`**，連 `--version` 也是：解析參數之前就先建 `$CODEX_HOME/tmp/arg0-macos`（讀 0.167.0 的 `codex-rs/arg0/src/lib.rs` 確認）。只是要讀版本（安裝後的斷言、`make verify`）就給它一個用完即丟的 `CODEX_HOME`。
+24. **只放 `codex` 一個執行檔（單檔版）生不了圖**（2026-11-16 實測）：內建的 image_gen 走 code mode，要另一支 `codex-code-mode-host`；單檔版 `codex --version` 正常，生圖時才報「failed to spawn code-mode host …: host executable was not found」。一定要裝完整套件（`codex-package-*`）。codex 找它的規則在 `codex-rs/install-context/src/lib.rs`：把自己的路徑解到底（symlink 會解開），所在目錄叫 `bin`、上一層有 `codex-package.json` 才算套件配置，再找 `codex-resources/`、`bin/`。檢查要看「easel 真正要的東西在不在」，不是「`--version` 會不會動」；檢查內容只有一份，在 defaults 的 `mac_node_codex_*_probe`。
 
 ## 手動的事（刻意不自動化）
 
@@ -121,6 +128,8 @@ mac-bootstrap/
 | Tailscale 安裝（.pkg）、登入、登入時啟動；UniFi 的 DHCP 保留 | sudo / 帳號 / 別台設備 |
 | `claude auth login`；第一次手動跑 `claude remote-control` 回答開啟與信任 | 帳號 OAuth；要真的終端機 |
 | 公鑰貼到 GitHub；別台機器的公鑰貼進 `config.yml` | 帳號 / 別台設備 |
+| `aws configure sso`（或從別台搬 `~/.aws/config`）、`aws sso login`；`gh auth login` | 帳號 OAuth；`make verify` 只提醒設定在不在 |
+| `codex login`（ChatGPT 帳號；或讓 easel 第一次開面板時帶你用裝置碼登入，要先在 ChatGPT 的安全性設定開啟裝置碼登入） | 帳號 OAuth |
 | Claude Desktop 的設定（登入時開啟、保持喚醒、Computer use、Dispatch、Trusted devices） | GUI / 帳號 |
 | Chrome 遠端桌面 | 已在跑；只在 `make verify` 檢查 |
 | 重開機實測（FileVault 的 SSH 解鎖、登入畫面能不能從外面過） | 要人在場 |

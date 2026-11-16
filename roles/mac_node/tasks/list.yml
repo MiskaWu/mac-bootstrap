@@ -21,6 +21,10 @@
     - { tag: podman,          path: "{{ mac_node_brew_prefix }}/bin/podman",                                     desc: "podman（brew；machine 只建不啟動）" }
     - { tag: docker-compat,   path: "{{ mac_node_home }}/.local/bin/docker",                                     desc: "Docker 相容（podman compose 用 docker-compose；docker → podman）" }
     - { tag: godot,           path: "{{ mac_node_home }}/.local/bin/godot",                                      desc: "Godot {{ godot_versions | join('、') }}（官方 build，多版本並存）" }
+    - { tag: codex,           path: "{{ mac_node_codex_pkg_dir }}/bin/codex-code-mode-host",                     desc: "Codex CLI {{ codex_version }}（官方完整套件 → ~/.local/codex-<版本>，~/.local/bin/codex 連過去；easel 生圖用，登入手動：codex login）" }
+    - { tag: bash,            path: "{{ mac_node_brew_prefix }}/bin/bash",                                      desc: "bash 5（brew；PATH 上排在 /bin/bash 3.2 前面）" }
+    - { tag: awscli,          path: "{{ mac_node_brew_prefix }}/bin/aws",                                        desc: "AWS CLI v2（brew；登入手動：aws configure sso）" }
+    - { tag: gh,              path: "{{ mac_node_brew_prefix }}/bin/gh",                                         desc: "GitHub CLI（brew；登入手動：gh auth login）" }
     - { tag: claude-guard,    path: "{{ mac_node_claude_managed_dir }}/managed-settings.d/mac-bootstrap.json", desc: "要裝東西先問（sudo；整台電腦層的 permissions.ask）" }
     - { tag: claude-md,       path: "{{ mac_node_claude_managed_dir }}/CLAUDE.md",                               desc: "這台的規矩（sudo；整台電腦層的 CLAUDE.md）" }
     - { tag: profile,         path: "{{ mac_node_home }}/.config/mac-bootstrap/env.zsh",                         desc: "PATH（~/.zshenv 與 ~/.zprofile 各 source 一次）" }

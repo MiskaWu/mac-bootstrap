@@ -1,0 +1,13 @@
+---
+# GitHub CLI（brew 的 gh，單一執行檔、沒有 brew 相依）。發版腳本用 gh variable get 讀 repo 變數
+# （例如 jury 的 deploy/build-local.sh）。不放進容器：token 在主機的鑰匙圈，腳本在主機上直接叫 gh。
+#
+# 登入手動：gh auth login（瀏覽器 OAuth）。token 預設存進鑰匙圈（服務名 gh:github.com），
+# 鑰匙圈不能用時才寫進 ~/.config/gh/hosts.yml。這裡不碰 ~/.config/gh。
+# gh extension install 裝的擴充在 ~/.local/share/gh/extensions，算全域安裝：make verify 會列出來。
+#
+# state: latest：跟著 brew 更新（同 go、uv、pnpm）。
+- name: gh（brew）
+  community.general.homebrew:
+    name: gh
+    state: latest

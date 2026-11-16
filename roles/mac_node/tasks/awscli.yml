@@ -1,0 +1,16 @@
+---
+# AWS CLI v2（brew 的 awscli）。發版要用：aws sso login、ECR、S3、SSM（例如 jury 的 deploy/）。
+# 不放進容器：aws sso login 要開主機的瀏覽器、ECR 的登入要接主機的 podman login。
+# 不用官方 .pkg：要 sudo、裝到 /usr/local/aws-cli，移除要自己刪檔，make verify 也會把收據當成漂移。
+# brew 版的相依（python@3.x 等）是 brew 內部的，不是頂層套件，漂移檢查不會報；
+# 2026-11-16 它要的 python@3.15 跟 ansible 共用同一份，不會多一份 python3。
+#
+# 登入與設定檔（~/.aws/config 的 SSO profile）是帳號的事，手動做：aws configure sso，
+# 或從別台搬 ~/.aws/config，之後 aws sso login --profile <名字>。這裡不碰 ~/.aws。
+# aws ssm start-session 要的 session-manager-plugin 沒有裝（send-command、get-parameter 不需要）。
+#
+# state: latest：跟著 brew 更新，雲端 API 與安全修正跟得上（同 go、uv、pnpm）。
+- name: awscli（brew）
+  community.general.homebrew:
+    name: awscli
+    state: latest

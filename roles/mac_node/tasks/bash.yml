@@ -1,0 +1,19 @@
+---
+# bash 5（brew）。macOS 內建的 /bin/bash 停在 3.2，沒有 ${x,,}、declare -A、mapfile 這些
+# bash 4 以後的語法，專案的腳本（例如 jury 的發版腳本）要用。不能放進容器：它是主機上
+# 執行腳本的直譯器；也沒有「專案自己宣告版本」的機制。
+#
+# **不改 PATH、不改 shebang，靠 env.zsh 的順序**：env.zsh 把 /opt/homebrew/bin 排在 /bin
+# 前面（ssh 'cmd'、LaunchAgent 的 zsh -l、終端機三種情境都是，2026-11-16 實測），所以
+# `#!/usr/bin/env bash` 拿到的是這裡的 bash 5。因此這個 tag 掛在 profile 那行（main-user.yml），
+# make verify 的「非互動 shell 拿得到指令」會檢查 bash 解析到 brew 的那支。
+# 不經 zsh 起的程序（GUI App 直接 exec、不走 zsh -l 的 plist）PATH 是 launchd 預設的
+# /usr/bin:/bin:…，拿到的還是 3.2。
+#
+# 寫死 /bin/bash 的不受影響：這個 repo 的 Makefile（SHELL := /bin/bash）、verify、bootstrap.sh
+# 刻意只用 3.2 的語法。不把它設成登入 shell（chsh 到 brew 的路徑要先改 /etc/shells、要 sudo，
+# 也沒有需要）。
+- name: bash（brew）
+  community.general.homebrew:
+    name: bash
+    state: latest

@@ -111,6 +111,7 @@ init: _ensure-ansible ## 起手：補上 ansible，並印出下一步
 	echo "  3. 裝好 Claude 後，在真的終端機跑一次 claude 做 /login"
 	echo "  4. 第一次在真的終端機手動跑 claude remote-control，回答兩個 y（見 README）"
 	echo "  5. 公鑰貼到 GitHub（make install TAGS=ssh-keys 會印出來）"
+	echo "  6. 裝了 awscli、gh 的話：aws configure sso（或從別台搬 ~/.aws/config）、gh auth login"
 
 ##@ 安裝
 # 不帶 TAGS = 不帶 --tags = 全部（含 system 層，會問密碼）。

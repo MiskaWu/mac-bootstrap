@@ -1,0 +1,196 @@
+---
+# Codex CLI：OpenAI 官方 GitHub release（openai/codex，tag 是 rust-v<版本>）的完整套件
+# codex-package-aarch64-apple-darwin.tar.gz，對官方公布的 codex-package_SHA256SUMS 驗證後整包放到
+# ~/.local/codex-<版本>，~/.local/bin/codex 連到裡面的 bin/codex（同 node 的放法）。
+# easel（github.com/MiskaWu/easel）用它以 ChatGPT 訂閱生圖。
+#
+# **一定要完整套件，不能只放 codex 一個檔**（2026-11-16 實測）：內建的 image_gen 走 code mode，code mode 要
+# 另一支 codex-code-mode-host。只有一個執行檔的 codex-aarch64-apple-darwin.tar.gz 沒有它，
+# `codex --version` 一切正常，生圖卻直接失敗。
+#
+# 套件解開是這樣（沒有外層目錄）：
+#   bin/codex  bin/codex-code-mode-host  bin/codex-exec-server
+#   codex-path/rg          codex 自己用，也會加進它子程序的 PATH —— 所以不需要全域的 rg
+#   codex-resources/…      語音等資源
+#   codex-package.json     版本、target、entrypoint
+# codex 找附屬程式的規則（0.167.0 的 codex-rs/install-context/src/lib.rs）：先把自己的路徑解到底
+#（symlink 會解開），所在目錄叫 bin、上一層有 codex-package.json 才算套件配置；code-mode-host 先找
+# codex-resources/，再找 bin/。所以 ~/.local/bin 只放一個 codex 的 symlink，附屬程式都留在套件裡。
+#
+# macOS 的三種套件裡用 codex-package（官方 install.sh 與 brew cask 裝的都是它）：
+#   codex-app-server-package     進入點是 codex-app-server，沒有 codex 指令
+#   codex-provisioned-package    包成 CodexCLI.app 加佈建描述檔，bin/codex 是一支轉呼叫的 sh
+#
+# 放在 ~/.local，不放官方 install.sh 的 ~/.codex/packages/standalone：工具本體不和你的資料（~/.codex 的
+# 登入、設定、對話紀錄）混在一起，移除工具不必進 ~/.codex 挑檔；install.sh 還會改 ~/.zprofile。
+# 不用 brew cask（只有最新版，brew upgrade 會跟著換）、不用 npm i -g（全域安裝）：都 pin 不住。
+#
+# 登入（codex login，ChatGPT 帳號）是手動的事。~/.codex 這裡不建也不碰，移除時怎麼處置見 uninstall-user.yml。
+- name: ~/.local/bin/codex 現在是什麼
+  ansible.builtin.stat:
+    path: "{{ mac_node_codex_bin }}"
+  register: _codex_bin
+  check_mode: false
+
+# 這裡放的是指進 ~/.local/codex-<版本> 的 symlink。
+#   - 一般檔案：這個 tag 早期放的單檔版，下面會原地換成 symlink。
+#   - 指到別處的 symlink：別的方式裝的（官方 install.sh 指向 ~/.codex/packages/standalone 之類）。
+#     兩套並存時 pin 沒有意義，也不知道該不該蓋掉 —— 停下來，不猜。
+- name: 不能已經有別的方式裝的 codex
+  ansible.builtin.assert:
+    that: >-
+      not (_codex_bin.stat.exists and _codex_bin.stat.islnk)
+      or ((_codex_bin.stat.lnk_target | default('')).startswith(mac_node_home ~ '/.local/codex-')
+          and (_codex_bin.stat.lnk_target | default('')).endswith('/bin/codex'))
+    fail_msg: >-
+      {{ mac_node_codex_bin }} 是 symlink（→ {{ _codex_bin.stat.lnk_target | default('?') }}），不是這裡放的。
+      先用原本的方式移除，再重跑 make install TAGS=codex。
+    quiet: true
+
+# 「裝了沒」看檔案在不在，不執行 codex（同 node）：make check 也會跑到這裡。
+- name: 套件 {{ codex_version }} 裝了沒
+  ansible.builtin.stat:
+    path: "{{ mac_node_codex_pkg_dir }}/{{ item }}"
+  loop: "{{ codex_package_required }}"
+  register: _codex_pkg
+  check_mode: false
+
+- name: 整理結果
+  ansible.builtin.set_fact:
+    _codex_pkg_ok: "{{ _codex_pkg.results | rejectattr('stat.exists') | list | length == 0 }}"
+
+- name: 乾跑：會下載 Codex CLI {{ codex_version }}
+  ansible.builtin.debug:
+    msg: >-
+      會下載 {{ codex_asset }}.tar.gz（rust-v{{ codex_version }}）並放到 {{ mac_node_codex_pkg_dir }}，~/.local/bin/codex 連到裡面的 bin/codex
+      {{- '（現在是單檔版的一般檔案，會換成連結）' if (_codex_bin.stat.exists and _codex_bin.stat.isreg) else '' }}
+  changed_when: true
+  when: ansible_check_mode and not (_codex_pkg_ok | bool)
+
+# --check 時 tempfile 不會給路徑，整段跳過（上面那則代替它報告）。
+- name: 下載並放好 Codex CLI {{ codex_version }}
+  when: not (_codex_pkg_ok | bool) and not ansible_check_mode
+  block:
+    - name: 暫存目錄
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: -mac-bootstrap-codex
+      register: _codex_tmp
+
+    # get_url 用網址裡的檔名去 checksum 檔找對應的那一行。
+    - name: 下載官方套件（對 {{ codex_checksums_asset }} 驗證）
+      ansible.builtin.get_url:
+        url: "{{ codex_release_url }}/{{ codex_asset }}.tar.gz"
+        dest: "{{ _codex_tmp.path }}/{{ codex_asset }}.tar.gz"
+        checksum: "sha256:{{ codex_release_url }}/{{ codex_checksums_asset }}"
+        mode: "0644"
+
+    - name: 解壓目錄
+      ansible.builtin.file:
+        path: "{{ _codex_tmp.path }}/x"
+        state: directory
+        mode: "0755"
+
+    # 不用 unarchive：它在 macOS 上要 GNU tar。套件沒有外層目錄，不用 --strip-components。
+    - name: 解開
+      ansible.builtin.command:
+        argv: [/usr/bin/tar, -xzf, "{{ _codex_tmp.path }}/{{ codex_asset }}.tar.gz", -C, "{{ _codex_tmp.path }}/x"]
+      changed_when: true
+
+    - name: 套件裡該有的檔都要在
+      ansible.builtin.stat:
+        path: "{{ _codex_tmp.path }}/x/{{ item }}"
+      loop: "{{ codex_package_required }}"
+      register: _codex_unpacked
+      failed_when: not (_codex_unpacked.stat.exists and _codex_unpacked.stat.isreg)
+
+    - name: ~/.local
+      ansible.builtin.file:
+        path: "{{ mac_node_home }}/.local"
+        state: directory
+        mode: "0755"
+
+    # 先解到暫存再整包搬過去：中途失敗不會留下半套的 ~/.local/codex-<版本>。
+    - name: 清掉上次沒完成的目錄
+      ansible.builtin.file:
+        path: "{{ mac_node_codex_pkg_dir }}"
+        state: absent
+
+    - name: 搬到 ~/.local/codex-{{ codex_version }}
+      ansible.builtin.command:
+        argv: [/bin/mv, "{{ _codex_tmp.path }}/x", "{{ mac_node_codex_pkg_dir }}"]
+      changed_when: true
+
+  always:
+    - name: 清掉暫存
+      ansible.builtin.file:
+        path: "{{ _codex_tmp.path }}"
+        state: absent
+      when: _codex_tmp.path is defined
+
+- name: ~/.local/bin
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.local/bin"
+    state: directory
+    mode: "0755"
+
+# force：早期單檔版留下的一般檔案會在這裡被換成 symlink；已經是對的連結就不動。
+- name: ~/.local/bin/codex → codex-{{ codex_version }}/bin/codex
+  ansible.builtin.file:
+    src: "{{ mac_node_codex_pkg_dir }}/bin/codex"
+    dest: "{{ mac_node_codex_bin }}"
+    state: link
+    force: true
+
+# 只認「codex-<x.y.z>」（含 -alpha.1 這種尾巴）這種名字，免得誤刪 ~/.local 裡別的東西。
+- name: 找舊版本
+  ansible.builtin.find:
+    paths: "{{ mac_node_home }}/.local"
+    patterns: '^codex-[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.]+)?$'
+    use_regex: true
+    file_type: directory
+  register: _codex_dirs
+  check_mode: false
+
+- name: 刪舊版本
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _codex_dirs.files | rejectattr('path', 'equalto', mac_node_codex_pkg_dir) | list }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+# ---- 確認 --------------------------------------------------------------------
+# 兩段檢查的內容在 defaults（mac_node_codex_*_probe），make verify 用的是同一段。
+- name: 讀 codex --version
+  ansible.builtin.shell:
+    cmd: "{{ mac_node_codex_version_probe }}"
+    executable: /bin/bash
+  register: _codex_v
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: codex --version 要等於 pin 的版本
+  ansible.builtin.assert:
+    that: (_codex_v.stdout | trim).endswith(' ' ~ codex_version)
+    fail_msg: "codex --version = {{ _codex_v.stdout | trim }}，應為 {{ codex_version }}"
+    quiet: true
+  when: not ansible_check_mode
+
+- name: 照 codex 的規則找 codex-code-mode-host
+  ansible.builtin.shell:
+    cmd: "{{ mac_node_codex_host_probe }}"
+    executable: /bin/bash
+  register: _codex_host
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: codex-code-mode-host 要在 codex 會去找的位置，而且起得來
+  ansible.builtin.assert:
+    that: _codex_host.rc == 0
+    fail_msg: "{{ _codex_host.stdout | default('') | trim }}"
+    quiet: true
+  when: not ansible_check_mode
