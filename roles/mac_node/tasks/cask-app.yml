@@ -1,0 +1,34 @@
+---
+# GUI App（Claude Desktop、Chrome、Chrome 遠端桌面主機）共用的一份：確認它在；不在才裝。
+# 由 main-user.yml 用 vars 帶進來：
+#   _app_name  顯示用的名字
+#   _app_path  用來判斷「裝了沒」的路徑
+#   _app_cask  brew cask 的名字
+#   _app_pkg   true = cask 的內容是 .pkg，安裝要 sudo → 只印指令（同 tailscale.yml 的理由）
+#
+# **已經裝著的不動**，不管是不是 brew 裝的：這幾個 App 都會自己更新，裝著的版本跟 cask 的版本
+# 幾乎不會一樣，brew 接管不了（--adopt 要內容完全相同）。IaC 管的是「這台該有它」和新機器上的安裝。
+# 移除是手動的事（Makefile 的 _check-uninstall-tags 會印步驟）：要先結束 App，
+# Chrome 與遠端桌面還有 root 的 LaunchDaemon，自動移除沒辦法在不拆掉使用中的 App 之下實測。
+- name: "{{ _app_name }} 裝了沒"
+  ansible.builtin.stat:
+    path: "{{ _app_path }}"
+  register: _cask_app
+  check_mode: false
+
+- name: "{{ _app_name }}：沒裝，用 brew cask 裝"
+  community.general.homebrew_cask:
+    name: "{{ _app_cask }}"
+    state: present
+  when:
+    - not _cask_app.stat.exists
+    - not _app_pkg
+
+- name: "{{ _app_name }}：沒裝，要在終端機自己跑（會問密碼）"
+  ansible.builtin.debug:
+    msg: >-
+      {{ _app_name }} 還沒裝。它的安裝檔是 .pkg，要 sudo 密碼，請在終端機自己跑：
+      brew install --cask {{ _app_cask }}
+  when:
+    - not _cask_app.stat.exists
+    - _app_pkg

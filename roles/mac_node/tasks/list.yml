@@ -8,6 +8,9 @@
   loop:
     - { tag: tmux,            path: "{{ mac_node_tmux_bin }}",                                                   desc: "tmux（Remote Control 伺服器的終端機）" }
     - { tag: claude,          path: "{{ mac_node_claude_bin }}",                                                 desc: "Claude Code CLI" }
+    - { tag: claude-desktop,  path: /Applications/Claude.app,                                                    desc: "Claude Desktop（沒裝才用 brew cask 裝；移除手動）" }
+    - { tag: chrome,          path: "/Applications/Google Chrome.app",                                           desc: "Google Chrome（沒裝才用 brew cask 裝；移除手動）" }
+    - { tag: chrome-remote-desktop, path: /Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app,            desc: "Chrome 遠端桌面主機（.pkg，安裝與移除都手動）" }
     - { tag: tailscale,       path: /Applications/Tailscale.app,                                                 desc: "Tailscale GUI 版（登入手動）" }
     - { tag: git-identity,    path: "{{ mac_node_home }}/.gitconfig",                                            desc: "全域 git 身分" }
     - { tag: ssh-keys,        path: "{{ mac_node_home }}/.ssh/id_ed25519_{{ ssh_key_tag }}_{{ ssh_key_scopes | first | default('github') }}", desc: "對外用的 SSH key 與 ~/.ssh/config" }

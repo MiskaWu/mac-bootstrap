@@ -52,7 +52,9 @@ mac-bootstrap/
 |---|---|---|---|
 | `tmux` | user | brew | brew 移除（claude-rc 還在就拒絕） |
 | `claude` | user | 官方 installer → `~/.local/bin/claude` | 刪入口與 `~/.local/share/claude`；`~/.claude` 永遠保留（claude-rc 還在就拒絕） |
-| `claude-rc` | user | Remote Control：啟動腳本 + LaunchAgent + tmux（自動帶 tmux、claude、profile） | bootout、關 tmux、刪 plist 與腳本；DATA=1 刪 log |
+| `claude-rc` | user | Remote Control：啟動腳本 + LaunchAgent + tmux（自動帶 tmux、claude、profile）；另有 `~/bin/claude-rc-entry open|close|list <專案>` 替單一專案臨時開關起點（從那裡開的對話才會載入專案自己的記憶） | bootout、關 tmux、刪 plist 與腳本；DATA=1 刪 log |
+| `claude-desktop` / `chrome` | user | 確認 App 在；不在才用 brew cask 裝（新機器用）。已經裝著的不動、不交給 brew 接管（App 自己會更新，版本對不上） | 手動（Makefile 印步驟） |
+| `chrome-remote-desktop` | user | 只檢查主機程式在不在（cask 是 .pkg、要 sudo，手動裝）。從外面過登入畫面的補救通道 | 手動（Makefile 印步驟） |
 | `tailscale` | user | 只檢查 GUI 版裝了沒（cask 是 .pkg、要 sudo，手動裝） | 手動（Makefile 印步驟） |
 | `git-identity` | user | 全域 user.name / user.email | unset |
 | `ssh-keys` | user | `id_ed25519_<tag>_<scope>` + `~/.ssh/config` managed block | 拿掉 block；**私鑰永遠不自動刪** |

@@ -1,0 +1,56 @@
+#!/bin/zsh
+# {{ ansible_managed }}
+# 來源：mac-bootstrap（TAGS=claude-rc）。替 {{ _rc_workdir }} 底下的某個專案臨時開／關一個 Remote Control 起點。
+#
+#   claude-rc-entry open <專案資料夾名>    開（已經開著就什麼都不做）
+#   claude-rc-entry close <專案資料夾名>   關（從那個起點開的對話會一起結束）
+#   claude-rc-entry list                   列出開著的起點
+#
+# 常駐的通用入口（tmux session {{ claude_rc_session }}）不歸這支管。臨時開的起點重開機後不會自己回來。
+# 第一次在某個資料夾開，會停在「Trust <資料夾>? [y/N]」：要人在終端機
+# `tmux attach -t {{ claude_rc_session }}-<名字>` 回答，不能代答。
+set -u
+TMUX_BIN={{ mac_node_tmux_bin | quote }}
+CLAUDE_BIN={{ mac_node_claude_bin | quote }}
+ROOT={{ _rc_workdir | quote }}
+PREFIX={{ claude_rc_session | quote }}-
+
+cmd="${1:-list}"; name="${2:-}"
+case "$cmd" in
+  list)
+    "$TMUX_BIN" ls 2>/dev/null | cut -d: -f1 | grep "^${PREFIX}" || echo "（沒有臨時開的起點）"
+    exit 0 ;;
+  open|close) ;;
+  *) echo "用法：claude-rc-entry open|close <專案資料夾名>，或 claude-rc-entry list" >&2; exit 2 ;;
+esac
+[[ "$name" =~ '^[A-Za-z0-9._-]+$' ]] || { echo "專案名只能是英數字、點、底線、連字號：${name}" >&2; exit 2; }
+dir="$ROOT/$name"; session="${PREFIX}${name}"
+
+if [[ "$cmd" == close ]]; then
+  "$TMUX_BIN" kill-session -t "=$session" 2>/dev/null && echo "已關：${session}" || echo "本來就沒開：${session}"
+  exit 0
+fi
+
+[[ -d "$dir" ]] || { echo "沒有這個資料夾：${dir}" >&2; exit 1; }
+if "$TMUX_BIN" has-session -t "=$session" 2>/dev/null; then
+  echo "已經開著：${session}"
+else
+  # 乾淨環境：工作階段的 CLAUDE_* 變數漏進伺服器會弄壞它，所以 env -i，PATH 交給 zsh -l 重建。
+  env_args=(-i SHELL=/bin/zsh TERM=xterm-256color)
+  for v in HOME USER LOGNAME TMPDIR SSH_AUTH_SOCK LANG; do
+    [[ -n "${(P)v:-}" ]] && env_args+=("$v=${(P)v}")
+  done
+  loop="while true; do ${(q)CLAUDE_BIN} remote-control --name ${(q)name} --spawn same-dir; echo \"[\$(date)] exited, restart in 10s\"; sleep 10; done"
+  "$TMUX_BIN" new-session -d -s "$session" -c "$dir" /usr/bin/env "${env_args[@]}" /bin/zsh -l -c "$loop"
+  echo "已開：${session}（${dir}）"
+fi
+# 等畫面出現連線或信任問題，最多 15 秒
+for i in {1..15}; do
+  out=$("$TMUX_BIN" capture-pane -p -t "=$session:" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -4)
+  if grep -qiE 'trust .*\[y/n\]' <<<"$out"; then
+    echo "停在信任問題：請在終端機跑 tmux attach -t ${session}，按 y，再按 Ctrl-b d 離開。"; exit 3
+  fi
+  grep -qiE 'connected' <<<"$out" && { echo "已連上，手機的目錄欄會多出 ${name}。"; exit 0; }
+  sleep 1
+done
+echo "還沒看到連線，畫面最後幾行："; echo "$out"

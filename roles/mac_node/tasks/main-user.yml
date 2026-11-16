@@ -35,6 +35,23 @@
   ansible.builtin.import_tasks: tailscale.yml
   tags: [user, tailscale]
 
+# ---- GUI App：確認在，不在才裝（cask-app.yml）。已經裝著的不動；移除是手動的事。----
+- name: Claude Desktop
+  ansible.builtin.import_tasks: cask-app.yml
+  vars: { _app_name: "Claude Desktop", _app_path: /Applications/Claude.app, _app_cask: claude, _app_pkg: false }
+  tags: [user, claude-desktop]
+
+- name: Google Chrome
+  ansible.builtin.import_tasks: cask-app.yml
+  vars: { _app_name: "Google Chrome", _app_path: "/Applications/Google Chrome.app", _app_cask: google-chrome, _app_pkg: false }
+  tags: [user, chrome]
+
+# 補救用的遠端通道（從外面過登入畫面）。.pkg，要 sudo，只檢查。
+- name: Chrome 遠端桌面主機
+  ansible.builtin.import_tasks: cask-app.yml
+  vars: { _app_name: "Chrome 遠端桌面主機", _app_path: /Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app, _app_cask: chrome-remote-desktop-host, _app_pkg: true }
+  tags: [user, chrome-remote-desktop]
+
 - name: git 身分
   ansible.builtin.import_tasks: git-identity.yml
   tags: [user, git-identity]

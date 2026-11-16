@@ -62,6 +62,13 @@
     mode: "0755"
   register: _rc_script
 
+# 替某個專案臨時開／關一個起點（常駐的通用入口不歸它管）。用法見腳本開頭。
+- name: ~/bin/claude-rc-entry
+  ansible.builtin.template:
+    src: claude-rc-entry.sh.j2
+    dest: "{{ mac_node_home }}/bin/claude-rc-entry"
+    mode: "0755"
+
 - name: LaunchAgent plist
   ansible.builtin.template:
     src: local.claude-rc.plist.j2

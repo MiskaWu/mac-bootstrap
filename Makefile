@@ -206,6 +206,17 @@ _check-uninstall-tags: _ensure-ansible
 	for t in $$(echo '$(TAGS)' | tr ',' ' '); do
 		[[ " $$known " == *" $$t "* ]] && continue
 		case "$$t" in
+			claude-desktop)
+				echo "claude-desktop 沒有自動移除：要先結束 App，而且沒辦法在不拆掉使用中的 App 之下實測。手動：" >&2
+				echo "    結束 Claude，把 /Applications/Claude.app 丟進垃圾桶（brew 裝的改用 brew uninstall --cask claude）" >&2
+				echo "    設定與對話在 ~/Library/Application Support/Claude，要不要刪自己決定；~/.claude 是 CLI 的，不要動" >&2 ;;
+			chrome)
+				echo "chrome 沒有自動移除：Google 的自動更新程式有 root 的 LaunchDaemon，Chrome 遠端桌面也共用它。手動：" >&2
+				echo "    結束 Chrome，把 /Applications/Google Chrome.app 丟進垃圾桶（brew 裝的改用 brew uninstall --cask google-chrome）" >&2
+				echo "    Chrome 遠端桌面也不留的話，自動更新程式才一起拆（Google 的說明：support.google.com/chrome/a/answer/7591084）" >&2 ;;
+			chrome-remote-desktop)
+				echo "chrome-remote-desktop 沒有自動移除：移除要 sudo，而且它是從外面過登入畫面的補救通道，拆之前先確認有別條路。手動：" >&2
+				echo "    打開 /Applications/Chrome Remote Desktop Host Uninstaller.app 照指示移除（brew 裝的改用 brew uninstall --cask chrome-remote-desktop-host）" >&2 ;;
 			tailscale)
 				echo "tailscale 沒有自動移除：它的 cask 是 .pkg，移除要 sudo，而 brew 不能用 root 跑。手動：" >&2
 				echo "    先在選單列的 Tailscale 登出，再 brew uninstall --cask tailscale-app（會問密碼）" >&2 ;;

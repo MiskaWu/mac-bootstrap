@@ -65,6 +65,7 @@
       loop:
         - "{{ _u_plist }}"
         - "{{ _u_home }}/bin/claude-rc-server.sh"
+        - "{{ _u_home }}/bin/claude-rc-entry"
 
     - name: claude-rc —— 登記
       ansible.builtin.set_fact:
