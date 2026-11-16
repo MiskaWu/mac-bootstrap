@@ -185,6 +185,116 @@
       ansible.builtin.set_fact:
         _uninstall_done: "{{ _uninstall_done + ['git-identity'] }}"
 
+# ---- Godot -------------------------------------------------------------------
+- name: Godot
+  tags: [godot]
+  block:
+    - name: 找所有版本（Godot-<x.y[.z]>.app）
+      ansible.builtin.find:
+        paths: "{{ godot_app_dir }}"
+        patterns: '^Godot-[0-9]+[.][0-9]+([.][0-9]+)?[.]app$'
+        use_regex: true
+        file_type: directory
+      register: _u_godot_apps
+
+    - name: 找 godot 指令
+      ansible.builtin.find:
+        paths: "{{ _u_home }}/.local/bin"
+        patterns: '^godot(-[0-9]+[.][0-9]+([.][0-9]+)?)?$'
+        use_regex: true
+        file_type: link
+      register: _u_godot_links
+
+    - name: 正在跑的程式
+      ansible.builtin.command:
+        argv: [/bin/ps, -axo, command=]
+      register: _u_godot_ps
+      changed_when: false
+
+    # 編輯器開著時把 .app 刪掉，沒存的場景會不見。
+    - name: Godot 不能正在跑
+      ansible.builtin.assert:
+        that: _u_godot_apps.files | map(attribute='path') | select('in', _u_godot_ps.stdout) | list | length == 0
+        fail_msg: >-
+          Godot 還開著（{{ _u_godot_apps.files | map(attribute='path') | select('in', _u_godot_ps.stdout) | map('basename') | join('、') }}），
+          先存檔、關掉再移除。什麼都沒動。
+        quiet: true
+
+    - name: 刪所有版本與指令
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ (_u_godot_apps.files + _u_godot_links.files) | map(attribute='path') | list }}"
+      loop_control:
+        label: "{{ item | basename }}"
+
+    - name: Godot —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['godot'] }}"
+        _uninstall_data: "{{ _uninstall_data + _d }}"
+      vars:
+        _d:
+          - path: "{{ _u_home }}/Library/Application Support/Godot"
+            what: Godot 的編輯器設定、匯出範本（export templates）、專案清單（所有版本共用）
+          - path: "{{ _u_home }}/Library/Caches/Godot"
+            what: Godot 的快取
+          - path: "{{ _u_home }}/Library/Saved Application State/org.godotengine.godot.savedState"
+            what: Godot 視窗狀態
+
+# ---- Docker 相容 -------------------------------------------------------------
+- name: Docker 相容
+  tags: [docker-compat]
+  block:
+    # 只刪自己放的 shim：同一個路徑如果是別的東西（例如手動裝的 docker），留著並報告。
+    - name: ~/.local/bin/docker 是不是這裡放的
+      ansible.builtin.command:
+        argv: [/usr/bin/grep, -q, "mac-bootstrap（TAGS=docker-compat）", "{{ _u_home }}/.local/bin/docker"]
+      register: _u_docker_shim
+      changed_when: false
+      failed_when: false
+
+    - name: 刪 docker → podman 的 shim
+      ansible.builtin.file:
+        path: "{{ _u_home }}/.local/bin/docker"
+        state: absent
+      when: _u_docker_shim.rc == 0
+
+    - name: 不是這裡放的就不動
+      ansible.builtin.debug:
+        msg: "~/.local/bin/docker 不是 mac-bootstrap 放的 shim，沒有刪。"
+      when: _u_docker_shim.rc == 1
+
+    - name: brew uninstall docker-compose
+      community.general.homebrew:
+        name: docker-compose
+        state: absent
+
+    - name: containers.conf 拿掉 compose_warning_logs
+      community.general.ini_file:
+        path: "{{ _u_home }}/.config/containers/containers.conf"
+        section: engine
+        option: compose_warning_logs
+        state: absent
+
+    # 只剩空的 [engine] 或什麼都沒有 = 這個檔是這裡建的，刪掉。
+    - name: containers.conf 還剩什麼
+      ansible.builtin.command:
+        argv: [/usr/bin/grep, -vE, '^[[:space:]]*(#.*|\[engine\])?[[:space:]]*$', "{{ _u_home }}/.config/containers/containers.conf"]
+      register: _u_containers_conf
+      changed_when: false
+      failed_when: false
+
+    - name: 空了就刪 containers.conf
+      ansible.builtin.file:
+        path: "{{ _u_home }}/.config/containers/containers.conf"
+        state: absent
+      when: _u_containers_conf.rc == 1
+
+    - name: Docker 相容 —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['docker-compat'] }}"
+        _uninstall_brew: true
+
 # ---- podman ------------------------------------------------------------------
 - name: podman
   tags: [podman]

@@ -1,0 +1,5 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# 來源：mac-bootstrap（TAGS=docker-compat）。這台沒有 Docker：`docker …` 一律交給 podman，
+# 同 Linux 上 podman 官方的 podman-docker 套件。`docker compose` 會變成 `podman compose`。
+exec {{ mac_node_brew_prefix }}/bin/podman "$@"

@@ -75,18 +75,26 @@
 
 - name: podman（brew，machine 只建不啟動）
   ansible.builtin.import_tasks: podman.yml
-  tags: [user, podman]
+  tags: [user, podman, docker-compat]
+
+- name: Docker 相容（podman compose 的 provider、docker → podman 的 shim）
+  ansible.builtin.import_tasks: docker-compat.yml
+  tags: [user, docker-compat]
+
+- name: Godot（官方 build，多版本並存）
+  ansible.builtin.import_tasks: godot.yml
+  tags: [user, godot]
 
 - name: ~/.claude/CLAUDE.md 的規矩
   ansible.builtin.import_tasks: claude-md.yml
-  tags: [user, claude-md]
+  tags: [user, claude-md, docker-compat, godot]
 
 # ---- 收尾 -------------------------------------------------------------------
 # profile 放在 claude-rc 前面：伺服器啟動時 PATH 必須已經對。
 # 內容看機器上實際有什麼（stat），不看開關。
 - name: PATH 環境設定（~/.zshenv + ~/.zprofile）
   ansible.builtin.import_tasks: profile.yml
-  tags: [user, profile, tmux, claude, claude-rc, go, python, node, pnpm, rust, podman]
+  tags: [user, profile, tmux, claude, claude-rc, go, python, node, pnpm, rust, podman, docker-compat, godot]
 
 - name: Remote Control 常駐伺服器
   ansible.builtin.import_tasks: claude-rc.yml

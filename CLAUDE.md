@@ -36,10 +36,10 @@ mac-bootstrap/
     │   ├── uninstall-user.yml  uninstall-system.yml
     │   ├── detect.yml  list.yml  verify.yml        # list / verify 是 [x, never]
     │   ├── tmux  claude  claude-rc  tailscale  git-identity  ssh-keys  authorized-keys
-    │   ├── arrive-home  go  python  node  pnpm  rust  podman  claude-md  profile
+    │   ├── arrive-home  go  python  node  pnpm  rust  podman  docker-compat  godot  claude-md  profile
     │   └── hostname  power  softwareupdate  sshd
     └── templates/  env.zsh.j2  claude-rc-server.sh.j2  local.claude-rc.plist.j2
-                    010-hardening.conf.j2  arrive-home.sh.j2  claude-md.j2
+                    010-hardening.conf.j2  arrive-home.sh.j2  claude-md.j2  docker-shim.sh.j2
 ```
 
 一個 repo、兩層（bring-up + Ansible）：兩層都是 Mac 專屬，bring-up 只有十幾行，拆兩個 repo 只多一次 clone。不併進 `dev-env-ansible`：那是 apt + systemd 的 Linux role，這台要管的多半是 pmset、sshd、launchd。
@@ -59,7 +59,9 @@ mac-bootstrap/
 | `go` / `python` / `pnpm` / `podman` | user | brew（python = 只裝 uv）；podman 另外 `machine init`（不啟動） | brew 移除 + `brew autoremove`；DATA=1 刪快取、下載的 runtime、VM 磁碟 |
 | `node` | user | 官方 tarball（SHASUMS256 驗證）→ `~/.local/node-<版本>`，`~/.local/node` symlink | 刪所有版本目錄；DATA=1 刪 `~/.npm` |
 | `rust` | user | 官方 rustup-init `--no-modify-path` | 同 Linux 的拆法：`~/.rustup` 整包、`~/.cargo` 拆開；config/credentials 永遠保留 |
-| `claude-md` | user | `~/.claude/CLAUDE.md` 的 managed block（這台的規矩） | 拿掉 block；只剩空白就刪檔 |
+| `docker-compat` | user | brew `docker-compose`（`podman compose` 的 provider）、`~/.local/bin/docker`（`exec podman` 的 shim）、`containers.conf` 關掉 provider 提示。引擎與指令都是 podman | brew 移除、刪 shim（只刪自己放的）、拿掉設定；檔案空了就刪 |
+| `godot` | user | 官方 zip（SHA512-SUMS 驗證）→ `~/Applications/Godot-<版本>.app`；`godot_versions` 列幾個裝幾個，清單外的刪掉；`godot-<版本>` 與 `godot` 指令 | 刪所有版本與指令（Godot 開著就拒絕）；DATA=1 刪編輯器設定與匯出範本 |
+| `claude-md` | user | `~/.claude/CLAUDE.md` 的 managed block（這台的規矩；Godot、Docker 相容那兩段裝了才寫） | 拿掉 block；只剩空白就刪檔。移除別的 tag 時會依現況重生 |
 | `profile` | user | `env.zsh`，由 `~/.zshenv` 與 `~/.zprofile` 各 source 一次 | 拿掉兩個 block、刪 env.zsh；rc 檔只剩空白就刪 |
 | `hostname` | system | 三個 `scutil --set` | 沒有「移除」：改 config 的名字再 install（Makefile 印說明） |
 | `power` | system | `pmset -c`（不同才改）、蓋子模式 | 收斂回 config 的 `mac_node_pmset_ac_original` |
@@ -104,6 +106,9 @@ mac-bootstrap/
 15. **睡著的機器叫不醒**（Wi-Fi 上的網路喚醒不可靠）→ 接電永不睡、只關螢幕。**開機解鎖前什麼都沒起來**：GUI 版 Tailscale、LaunchAgent 都要等 GUI 登入。
 16. **macOS 的 `pgrep` 預設不列出自己的上層程序** → 從手機開的工作階段是 remote-control 伺服器的子程序，用 `pgrep` 找伺服器永遠找不到。一律 `pgrep -a`。
 17. **Remote Control 畫面上的 `Connected` 只在一開始印一次**，跑久了會被 `Reconnected after …` 的紀錄擠出畫面 → 判斷連線看伺服器程序有沒有 443 的 ESTABLISHED（`lsof -a -p <pid> -iTCP:443 -sTCP:ESTABLISHED`）。
+18. **`make … EXTRA='-e {"k":[…]}'` 的 JSON 會被 shell 拆掉**（recipe 裡沒加引號，雙引號被吃掉，什麼都沒覆蓋也不報錯）→ 臨時覆蓋變數寫成檔案：`EXTRA="-e @/tmp/x.yml"`。
+19. **verify 不准有副作用**：`cargo install --list` 會建出空的 `~/.cargo/.crates.toml` / `.crates2.json`；`pnpm ls -g` 會建出 `~/Library/pnpm/bin` → 直接讀它們的清單檔。
+20. **Go 的 `toolchain` 只會往新版切**：go.mod 寫比主機舊的版本不會降版，要舊版得帶 `GOTOOLCHAIN=go1.x.y`。**pnpm 的 devEngines.runtime 只對 `pnpm exec` / `pnpm run` 生效**，直接打 `node` 還是主機的。
 
 ## 手動的事（刻意不自動化）
 

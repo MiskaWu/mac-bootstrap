@@ -1,0 +1,195 @@
+---
+# Godot 編輯器：官方 GitHub release 的 macOS universal zip，對官方 SHA512-SUMS.txt 驗證。
+#
+# **多版本並存**：godot_versions 列幾個就裝幾個，各自是 ~/Applications/Godot-<版本>.app；
+# 清單上沒有的版本會被移除（宣告式，同 node）。指令：
+#   godot-<版本>   每個版本一個（~/.local/bin 的 symlink）
+#   godot          指向 godot_default_version
+# 專案要用哪一版看 project.godot 的 config/features。Godot 沒有「專案自己下載對的版本」的機制，
+# 用新版開舊專案會轉換專案檔 —— 所以版本由這裡明確宣告，不用 brew cask（只有最新版、brew upgrade 會跟著換）。
+#
+# 只有標準版（GDScript）。C#（.NET）版之後要再加：zip 檔名多 _mono_，另外需要 .NET SDK。
+# 編輯器設定、匯出範本（export templates）、專案清單在 ~/Library/Application Support/Godot，所有版本共用。
+- name: godot_default_version 要在 godot_versions 裡
+  ansible.builtin.assert:
+    that: godot_default_version in godot_versions
+    fail_msg: "godot_default_version={{ godot_default_version }} 不在 godot_versions={{ godot_versions }} 裡"
+    quiet: true
+
+# 不給 mode：既有目錄只確保存在、不改權限（這台的 ~/Applications 本來就有，是 0700）。
+- name: ~/Applications
+  ansible.builtin.file:
+    path: "{{ godot_app_dir }}"
+    state: directory
+
+- name: 已經裝了哪些版本
+  ansible.builtin.stat:
+    path: "{{ godot_app_dir }}/Godot-{{ item }}.app/Contents/MacOS/Godot"
+  loop: "{{ godot_versions }}"
+  register: _godot_have
+  check_mode: false
+
+- name: 還沒裝的版本
+  ansible.builtin.set_fact:
+    _godot_missing: "{{ _godot_have.results | rejectattr('stat.exists') | map(attribute='item') | list }}"
+
+- name: 乾跑：會下載
+  ansible.builtin.debug:
+    msg: "會下載 Godot {{ _godot_missing | join('、') }}，放到 {{ godot_app_dir }}/Godot-<版本>.app"
+  changed_when: true
+  when: ansible_check_mode and _godot_missing | length > 0
+
+# --check 時 tempfile 不會給路徑，整段跳過（上面那則代替它報告）。
+- name: 下載並放好
+  when: _godot_missing | length > 0 and not ansible_check_mode
+  block:
+    - name: 暫存目錄
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: -mac-bootstrap-godot
+      register: _godot_tmp
+
+    # dest 的檔名要跟 SHA512-SUMS.txt 裡的一樣：get_url 用檔名去對那一行。
+    - name: 下載官方 zip（對 SHA512-SUMS.txt 驗證）
+      ansible.builtin.get_url:
+        url: "{{ godot_release_url }}/{{ item }}-stable/Godot_v{{ item }}-stable_macos.universal.zip"
+        dest: "{{ _godot_tmp.path }}/Godot_v{{ item }}-stable_macos.universal.zip"
+        checksum: "sha512:{{ godot_release_url }}/{{ item }}-stable/SHA512-SUMS.txt"
+        mode: "0644"
+      loop: "{{ _godot_missing }}"
+
+    # 用 ditto 不用 unzip：.app 裡的 symlink、權限、程式碼簽章都要原樣保留。
+    - name: 解開
+      ansible.builtin.command:
+        argv: [/usr/bin/ditto, -x, -k, "{{ _godot_tmp.path }}/Godot_v{{ item }}-stable_macos.universal.zip", "{{ _godot_tmp.path }}/x-{{ item }}"]
+      changed_when: true
+      loop: "{{ _godot_missing }}"
+
+    - name: zip 裡要有 Godot.app
+      ansible.builtin.stat:
+        path: "{{ _godot_tmp.path }}/x-{{ item }}/Godot.app/Contents/MacOS/Godot"
+      loop: "{{ _godot_missing }}"
+      register: _godot_unpacked
+      failed_when: not _godot_unpacked.stat.exists
+
+    # 先解到暫存再整包搬過去：中途失敗不會留下半套的 .app。
+    - name: 清掉上次沒完成的
+      ansible.builtin.file:
+        path: "{{ godot_app_dir }}/Godot-{{ item }}.app"
+        state: absent
+      loop: "{{ _godot_missing }}"
+
+    - name: 搬到 ~/Applications/Godot-<版本>.app
+      ansible.builtin.command:
+        argv: [/bin/mv, "{{ _godot_tmp.path }}/x-{{ item }}/Godot.app", "{{ godot_app_dir }}/Godot-{{ item }}.app"]
+      changed_when: true
+      loop: "{{ _godot_missing }}"
+
+  always:
+    - name: 清掉暫存
+      ansible.builtin.file:
+        path: "{{ _godot_tmp.path }}"
+        state: absent
+      when: _godot_tmp.path is defined
+
+- name: ~/.local/bin
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.local/bin"
+    state: directory
+    mode: "0755"
+
+- name: godot-<版本> 指令
+  ansible.builtin.file:
+    src: "{{ godot_app_dir }}/Godot-{{ item }}.app/Contents/MacOS/Godot"
+    dest: "{{ mac_node_home }}/.local/bin/godot-{{ item }}"
+    state: link
+    force: true
+  loop: "{{ godot_versions }}"
+
+- name: godot 指令 → {{ godot_default_version }}
+  ansible.builtin.file:
+    src: "{{ godot_app_dir }}/Godot-{{ godot_default_version }}.app/Contents/MacOS/Godot"
+    dest: "{{ mac_node_home }}/.local/bin/godot"
+    state: link
+    force: true
+
+# ---- 清單上沒有的版本 --------------------------------------------------------
+# 只認「Godot-<x.y> / Godot-<x.y.z>」這種名字，免得誤刪 ~/Applications 裡別的東西。
+- name: 找所有版本
+  ansible.builtin.find:
+    paths: "{{ godot_app_dir }}"
+    patterns: '^Godot-[0-9]+[.][0-9]+([.][0-9]+)?[.]app$'
+    use_regex: true
+    file_type: directory
+  register: _godot_apps
+  check_mode: false
+
+- name: 找所有 godot-<版本> 指令
+  ansible.builtin.find:
+    paths: "{{ mac_node_home }}/.local/bin"
+    patterns: '^godot-[0-9]+[.][0-9]+([.][0-9]+)?$'
+    use_regex: true
+    file_type: link
+  register: _godot_links
+  check_mode: false
+
+- name: 要移除的舊版本
+  ansible.builtin.set_fact:
+    _godot_stale: >-
+      {{ _godot_apps.files | map(attribute='path')
+         | reject('in', godot_versions | map('regex_replace', '^(.*)$', godot_app_dir ~ '/Godot-\1.app') | list)
+         | list }}
+
+- name: 舊版本不能正在跑
+  ansible.builtin.command:
+    argv: [/bin/ps, -axo, command=]
+  register: _godot_ps
+  changed_when: false
+  check_mode: false
+  when: _godot_stale | length > 0
+
+- name: 舊版本正在跑就停下來
+  ansible.builtin.assert:
+    that: _godot_stale | select('in', _godot_ps.stdout) | list | length == 0
+    fail_msg: "要移除的版本正在跑：{{ _godot_stale | select('in', _godot_ps.stdout) | map('basename') | join('、') }}。先關掉再重跑。"
+    quiet: true
+  when: _godot_stale | length > 0
+
+- name: 刪舊版本
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ _godot_stale }}"
+  loop_control:
+    label: "{{ item | basename }}"
+
+- name: 刪舊版本的指令
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ _godot_links.files | map(attribute='path')
+       | reject('in', godot_versions | map('regex_replace', '^(.*)$', mac_node_home ~ '/.local/bin/godot-\1') | list)
+       | list }}
+  loop_control:
+    label: "{{ item | basename }}"
+
+# ---- 確認 --------------------------------------------------------------------
+- name: 每個版本的 --version
+  ansible.builtin.command:
+    argv: ["{{ mac_node_home }}/.local/bin/godot-{{ item }}", --version]
+  loop: "{{ godot_versions }}"
+  register: _godot_v
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: --version 要對得上
+  ansible.builtin.assert:
+    that: (item.stdout | trim).startswith(item.item ~ '.stable')
+    fail_msg: "godot-{{ item.item }} --version = {{ item.stdout | trim }}"
+    quiet: true
+  loop: "{{ _godot_v.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not ansible_check_mode

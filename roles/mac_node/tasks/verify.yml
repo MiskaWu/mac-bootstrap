@@ -195,6 +195,9 @@
         [ -x "$b/podman" ] && want="$want podman"
         [ -x "$HOME/.local/node/bin/node" ] && want="$want node npm"
         [ -x "$HOME/.cargo/bin/rustup" ] && want="$want cargo rustc"
+        [ -x "$HOME/.local/bin/docker" ] && want="$want docker"
+        [ -x "$b/docker-compose" ] && want="$want docker-compose"
+        [ -L "$HOME/.local/bin/godot" ] && want="$want godot"
         bad=""
         for mode in ssh launchd; do
           flag=""; [ $mode = launchd ] && flag="-l"
@@ -244,6 +247,22 @@
           "$b/podman" machine inspect {{ podman_machine_name | quote }} >/dev/null 2>&1 || bad="$bad podman machine 不在（make install TAGS=podman）"
           st=$("$b/podman" machine inspect {{ podman_machine_name | quote }} 2>/dev/null | /usr/bin/grep -o '"State": *"[a-z]*"' | /usr/bin/grep -o '[a-z]*"$' | tr -d '"')
           out="$out podman machine=${st:-?}"
+        fi
+        if [ -e "$HOME/.local/bin/docker" ]; then
+          /usr/bin/grep -q '/bin/podman "\$@"' "$HOME/.local/bin/docker" || bad="$bad ~/.local/bin/docker 不是交給 podman 的 shim"
+          out="$out docker→podman"
+        fi
+        if [ -x "$b/docker-compose" ]; then
+          out="$out compose $("$b/docker-compose" version --short 2>/dev/null)"
+        fi
+        if [ -L "$HOME/.local/bin/godot" ]; then
+          for v in {{ godot_versions | map('quote') | join(' ') }}; do
+            gv=$("$HOME/.local/bin/godot-$v" --version 2>/dev/null | tail -1 || true)
+            [[ $gv == "$v".stable* ]] || bad="$bad godot-${v}=${gv:-跑不起來}"
+          done
+          d=$(/usr/bin/readlink "$HOME/.local/bin/godot")
+          [[ $d == */Godot-{{ godot_default_version }}.app/* ]] || bad="$bad godot 指向 ${d}（應為 {{ godot_default_version }}）"
+          out="$out godot {{ godot_versions | join('/') }}"
         fi
         [ -z "$bad" ] || { echo "不對：$bad"; exit 1; }
         [ -n "$out" ] || { echo "沒有裝任何語言工具"; exit 0; }
@@ -350,13 +369,18 @@
             extra="$extra npm:${n}"
           done
         fi
-        if [ -x {{ mac_node_brew_prefix | quote }}/bin/pnpm ]; then
-          for d in $(PATH="$HOME/.local/node/bin:$PATH" {{ mac_node_brew_prefix | quote }}/bin/pnpm ls -g --depth=0 --parseable 2>/dev/null | tail -n +2); do
-            extra="$extra pnpm:${d##*/}"
+        # 直接讀 pnpm 全域目錄裡的 package.json，不跑 `pnpm ls -g`：它會順手建出
+        # ~/Library/pnpm/bin（實測），verify 不准改任何東西。
+        while IFS= read -r pj; do
+          deps=$(/usr/bin/plutil -extract dependencies json -o - "$pj" 2>/dev/null || true)
+          for n in $(/usr/bin/grep -o '"[^"]*":' <<<"$deps" | tr -d '":\\'); do
+            extra="$extra pnpm:${n}"
           done
-        fi
-        if [ -x "$HOME/.cargo/bin/cargo" ]; then
-          for c in $("$HOME/.cargo/bin/cargo" install --list 2>/dev/null | awk '/^[^ ]/ {print $1}'); do
+        done < <(/usr/bin/find "$HOME/Library/pnpm/global" -maxdepth 3 -name package.json -not -path '*/node_modules/*' 2>/dev/null)
+        # 直接讀 cargo 的清單檔，不跑 `cargo install --list`：它會順手建出空的 .crates.toml /
+        # .crates2.json（實測），verify 不准改任何東西。
+        if [ -s "$HOME/.cargo/.crates.toml" ]; then
+          for c in $(awk -F'"' '/^"/ {split($2, a, " "); print a[1]}' "$HOME/.cargo/.crates.toml"); do
             extra="$extra cargo:${c}"
           done
         fi

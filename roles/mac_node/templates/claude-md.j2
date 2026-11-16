@@ -1,13 +1,25 @@
 # 這台 Mac 的規矩（由 ~/Developer/mac-bootstrap 管理，make install TAGS=claude-md）
 
 - **主機要保持乾淨。** 開發工具與多個版本一律隔離：用專案自己的版本宣告、git worktree、podman 容器。
-  不要全域安裝東西（`brew install`、`npm i -g`、`pip install`、`cargo install`、`uv tool install`、`go install`）；真的需要就先問 Miska。
+  不要全域安裝東西（`brew install`、`npm i -g`、`pip install`、`cargo install`、`uv tool install`、`go install`、`curl … | sh`）。
+  工作上需要新工具時，在 `~/Developer/mac-bootstrap` 加一個 tag（安裝與 `make uninstall` 都要有），不要直接裝；不確定就先問 Miska。
+  `make verify` 會列出 IaC 以外的東西。
 - **這台的設定是 IaC。** 系統設定、常駐服務、PATH、要裝的工具都在 `~/Developer/mac-bootstrap`（Ansible + make）。
   要改就改那個 repo 再 `make install TAGS=<項目>`，不要直接動 `~/.zshenv`、`~/.zprofile`、LaunchAgent 或 `/etc`。
 - **Python 一律 `uv run` / `uv sync`**（專案的 `.venv`，版本由 `.python-version` / `requires-python` 宣告）。
-  主機 PATH 上刻意沒有 uv 管的 Python（`UV_PYTHON_INSTALL_BIN=0`），`python3` 會是系統的 3.9.6，不要用它。
-- **Node** 是 `~/.local/node`（{{ node_version }}）。專案要別的版本：`package.json` 的 `devEngines.runtime` 交給 pnpm 下載，再不行就進容器。
-- **Go** 由 `go.mod` 的 `toolchain` 宣告（`GOTOOLCHAIN=auto` 自動下載）；**Rust** 由 `rust-toolchain.toml` 宣告。
-- **容器用 podman**（沒有 Docker Desktop、沒有 `/var/run/docker.sock`，`DOCKER_HOST` 已設好）。
-  VM 平常是關的：用之前 `podman machine start`，用完 `podman machine stop`。
+  主機 PATH 上刻意沒有 uv 管的 Python（`UV_PYTHON_INSTALL_BIN=0`）。PATH 上的 `python3` 是 brew 裡 ansible 的相依、`/usr/bin/python3` 是系統的 3.9，兩個都不要用。
+- **Node** 是 `~/.local/node`（{{ node_version }}）。專案要別的版本：`pnpm runtime set node <版本>` 寫進 `devEngines.runtime`，
+  之後一律 `pnpm exec node` / `pnpm run`（直接打 `node` 是主機的版本）。再不行就進容器。
+- **Go** 由 `go.mod` 宣告：比主機新的版本會自動下載；`toolchain` **不會往舊版切**，要舊版就帶 `GOTOOLCHAIN=go1.x.y`
+  （寫進專案的 Makefile 或腳本）。**Rust** 由 `rust-toolchain.toml` 宣告，rustup 自動下載。
+- **容器只用 podman**（沒有 Docker Desktop、沒有 `/var/run/docker.sock`）。VM 平常是關的：用之前 `podman machine start`，用完 `podman machine stop`。
+{% if mac_node_have_docker_compat | default(false) %}
+  compose 用 `podman compose`（provider 是 docker-compose）。`docker` 指令是交給 podman 的 shim，寫死 `docker` 的腳本照樣能跑；
+  走 Docker API 的函式庫（testcontainers 等）靠已設好的 `DOCKER_HOST`。
+{% endif %}
 - 本地 AI（MLX、PyTorch MPS）要用 Metal，只能在主機跑：每個專案一個 uv 專案，模型快取在 `~/.cache/huggingface`。
+{% if mac_node_have_godot | default(false) %}
+- **Godot** 有這些版本並存：{{ godot_versions | join('、') }}（`~/Applications/Godot-<版本>.app`）。指令 `godot-<版本>`，`godot` = {{ godot_default_version }}。
+  專案用哪一版看 `project.godot` 的 `config/features`，用對應的 `godot-<版本>`；不要用新版開舊專案（會轉換專案檔）。
+  遠端沒有畫面：檢查與測試用 `godot-<版本> --headless --path <專案> …`。要別的版本就改 mac-bootstrap 的 `godot_versions`。
+{% endif %}

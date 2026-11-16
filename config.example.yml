@@ -69,3 +69,8 @@ arrive_home_apps: []
 #  - "Music"
 arrive_home_urls: []
 #  - "someapp://some/path"
+
+# ---- Godot（TAGS=godot）----------------------------------------------------
+# 要並存的版本（官方 release tag 去掉 -stable）。列幾個裝幾個，拿掉的會被刪。
+# 不填就用 defaults 的最新一版。`godot` 指令指向 godot_default_version（預設是清單最後一個）。
+# godot_versions: ["4.6.3", "4.7.2"]

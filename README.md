@@ -37,17 +37,27 @@ TAGS 可以一次給多個：`TAGS=go,node`。碰到 system 層（`hostname`、`
 | Remote Control | `claude`、`tmux`、`claude-rc`、`claude-md` |
 | 連線與身分 | `tailscale`、`authorized-keys`、`ssh-keys`、`git-identity`、`sshd` |
 | 常駐節點 | `power`、`softwareupdate`、`hostname`、`arrive-home` |
-| 語言與容器 | `go`、`python`（只有 uv）、`node`、`pnpm`、`rust`、`podman` |
+| 語言與容器 | `go`、`python`（只有 uv）、`node`、`pnpm`、`rust`、`podman`、`docker-compat` |
+| 遊戲引擎 | `godot`（多版本並存） |
 | 環境 | `profile`（PATH，由其他 tag 自動帶） |
 
 語言的原則：**不裝通用版本管理器**。專案自己宣告版本，交給語言自己的機制下載：
 
-- Go：`go.mod` 的 `toolchain`
+- Go：`go.mod`（比主機新的版本自動下載；要比主機舊的版本得帶 `GOTOOLCHAIN=go1.x.y`）
 - Python：`.python-version`，一律 `uv run`
-- Node：`package.json` 的 `devEngines.runtime`，由 pnpm 下載
+- Node：`pnpm runtime set node <版本>` 寫進 `devEngines.runtime`，由 pnpm 下載；執行要用 `pnpm exec node` / `pnpm run`
 - Rust：`rust-toolchain.toml`
 
 主機上只放 bootstrap 用的那一份。服務類（資料庫等）一律進 podman 容器。
+
+容器只用 podman，沒有 Docker：
+
+- compose 用 `podman compose`（provider 是 docker-compose，只透過 podman 的 API 建容器）。
+- `docker …` 會交給 podman（`TAGS=docker-compat` 的 shim），寫死 `docker` 的腳本照樣能跑。
+- testcontainers 這類走 Docker API 的函式庫靠 `DOCKER_HOST`，不用另外設定。
+- VM 平常是關的：`podman machine start` / `podman machine stop`。
+
+Godot 沒有「專案自己下載版本」的機制，所以版本寫在 `config.yml` 的 `godot_versions`：列幾個裝幾個（`~/Applications/Godot-<版本>.app`、`godot-<版本>` 指令），拿掉的會被刪。
 
 ## 移除
 

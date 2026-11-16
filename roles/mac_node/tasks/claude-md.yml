@@ -7,6 +7,21 @@
     path: "{{ mac_node_home }}/.claude"
     state: directory
 
+# 內容看機器上實際有什麼（同 profile）：裝了才寫那一段，移除後重生就會拿掉。
+- name: 偵測要寫進規矩的項目
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ mac_node_home }}/.local/bin/docker"
+    - "{{ mac_node_home }}/.local/bin/godot"
+  register: _claude_md_probe
+  check_mode: false
+
+- name: 整理偵測結果
+  ansible.builtin.set_fact:
+    mac_node_have_docker_compat: "{{ _claude_md_probe.results[0].stat.exists }}"
+    mac_node_have_godot: "{{ _claude_md_probe.results[1].stat.exists }}"
+
 - name: ~/.claude/CLAUDE.md 的 managed block
   ansible.builtin.blockinfile:
     path: "{{ mac_node_home }}/.claude/CLAUDE.md"

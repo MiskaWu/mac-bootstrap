@@ -1,0 +1,38 @@
+---
+# 讓寫給 Docker 的專案直接在 podman 上跑。引擎與指令都是 podman；**不裝** Docker Desktop、
+# brew 的 docker CLI、podman-mac-helper（root 的 LaunchDaemon，research §4）。
+#
+#   podman compose …  主要的用法。podman 只是轉接，實際讀 compose.yaml 的是外部的 provider，
+#                     這裡用 docker-compose（單一執行檔、沒有相依，Compose 規格的參考實作）。
+#                     它只透過 podman 的 Docker 相容 API 建容器，不需要 Docker。
+#                     （另一個 provider podman-compose 是 Python 寫的、要拉 brew 的 python，
+#                     對規格的支援也落後，不用）
+#   docker …          ~/.local/bin/docker 一行 shim：exec podman "$@"。給寫死 docker 的腳本用。
+#   Docker API        testcontainers 這類函式庫走 DOCKER_HOST（TAGS=podman 的 env.zsh 會設）。
+- name: compose provider（brew docker-compose）
+  community.general.homebrew:
+    name: docker-compose
+    state: present
+
+- name: ~/.local/bin
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.local/bin"
+    state: directory
+    mode: "0755"
+
+- name: ~/.local/bin/docker → podman
+  ansible.builtin.template:
+    src: docker-shim.sh.j2
+    dest: "{{ mac_node_home }}/.local/bin/docker"
+    mode: "0755"
+
+# podman compose 每次都印一行「>>>> Executing external compose provider … <<<<」（stderr），
+# 會混進測試輸出。只關這一個選項：containers.conf 本來不存在，其餘設定照 podman 預設。
+- name: 關掉 podman compose 的 provider 提示
+  community.general.ini_file:
+    path: "{{ mac_node_home }}/.config/containers/containers.conf"
+    section: engine
+    option: compose_warning_logs
+    value: "false"
+    mode: "0644"
+

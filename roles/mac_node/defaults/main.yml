@@ -67,6 +67,15 @@ podman_machine_cpus: 4
 podman_machine_memory: 8192
 podman_machine_disk: 100
 
+# ---- Godot（tasks/godot.yml）--------------------------------------------------
+# 多版本並存：列幾個裝幾個（~/Applications/Godot-<版本>.app），清單上沒有的會被移除。
+# 版本寫法同官方 release tag 去掉 -stable：x.y.0 是 "4.7"、之後是 "4.7.2"。
+# 要多裝一版就加進清單，在 config.yml 覆蓋即可，例：godot_versions: ["4.6.3", "4.7.2"]。
+godot_versions: ["4.7.2"]
+godot_default_version: "{{ godot_versions | last }}"
+godot_release_url: https://github.com/godotengine/godot/releases/download
+godot_app_dir: "{{ mac_node_home }}/Applications"
+
 # ---- 移除（make uninstall）---------------------------------------------------
 # DATA=1 → -e mac_node_uninstall_data=true：連快取、下載的 runtime、VM 磁碟一起刪。
 mac_node_uninstall_data: false
@@ -79,7 +88,7 @@ arrive_home_urls: []
 # brew 上「允許存在」的頂層套件。多出來的 make verify 會列出來（只報告，不移除）。
 # 來源：make 由 bootstrap.sh 裝、ansible 由 Makefile 裝、其餘由各自的 task 檔裝。
 # 加一個 brew 套件的 task 時，回來這裡補一行。
-mac_node_brew_allowed_formulae: [make, ansible, tmux, go, uv, pnpm, podman]
+mac_node_brew_allowed_formulae: [make, ansible, tmux, go, uv, pnpm, podman, docker-compose]
 mac_node_brew_allowed_casks: ["{{ mac_node_tailscale_cask }}"]
 
 # brew 以外「允許存在」的東西。比對用 bash 的 glob（可以寫 *）。同樣只報告、不移除。
@@ -92,6 +101,7 @@ mac_node_allowed_apps:
   - com.google.Chrome                         # Chrome（手動，還沒納入 IaC）
   - com.google.Chrome.app.*                   # Chrome 建的網頁 App（~/Applications/Chrome Apps）
   - com.google.chromeremotedesktop.*          # Chrome 遠端桌面主機附的移除程式（手動，還沒納入 IaC）
+  - org.godotengine.godot                     # godot（~/Applications/Godot-<版本>.app）
 # 非 Apple 的安裝收據（pkgutil --pkgs）
 mac_node_allowed_pkgs:
   - com.tailscale.ipn.macsys                  # tailscale
@@ -107,5 +117,8 @@ mac_node_allowed_launchd:
 # 使用者的執行檔目錄。curl | sh 的安裝程式最常把東西丟在這裡。
 mac_node_allowed_user_bins:
   - .local/bin/claude                         # claude
+  - .local/bin/docker                         # docker-compat（exec podman 的 shim）
+  - .local/bin/godot                          # godot
+  - .local/bin/godot-*                        # godot（每個版本一個）
   - bin/arrive-home.sh                        # arrive-home
   - bin/claude-rc-server.sh                   # claude-rc
