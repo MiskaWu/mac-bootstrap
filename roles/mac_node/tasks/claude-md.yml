@@ -1,31 +1,26 @@
 ---
-# ~/.claude/CLAUDE.md 裡的一個 managed block：這台機器上每個 Claude 工作階段（包括從手機
-# 經 Remote Control 開的）都會讀到的規矩。只管這一塊，檔案其餘部分是 Miska 自己的。
-# 只確保存在、不管權限：~/.claude 是 Claude Code 自己的目錄，權限由它決定。
-- name: ~/.claude
+# 這台 Mac 的規矩：Claude Code 官方的「整台電腦層」CLAUDE.md（docs: memory「managed policy」）。
+#   /Library/Application Support/ClaudeCode/CLAUDE.md
+# 這台上每個 Claude 工作階段都會讀到，而且不能被 claudeMdExcludes 排除。
+#
+# 為什麼不放 ~/.claude/CLAUDE.md：那是個人層，由 claude-config 共用到每一台電腦（Mac、WSL、Windows）。
+# 分法：每台都成立的原則放個人層（claude-config 的 rules/tools-and-versions.md），只有這台成立的細節放這裡。
+#
+# 內容是固定文字，不看這台裝了什麼：這一層要 sudo 才能改，內容若跟著 godot 這類 user 層的
+# tag 變，每次裝工具都要輸入密碼。改成寫「怎麼查現況」。
+# system 層（become）：整個檔由這裡產生，屬於 root，工作階段改不到。
+- name: /Library/Application Support/ClaudeCode
   ansible.builtin.file:
-    path: "{{ mac_node_home }}/.claude"
+    path: "{{ mac_node_claude_managed_dir }}"
     state: directory
+    owner: root
+    group: wheel
+    mode: "0755"
 
-# 內容看機器上實際有什麼（同 profile）：裝了才寫那一段，移除後重生就會拿掉。
-- name: 偵測要寫進規矩的項目
-  ansible.builtin.stat:
-    path: "{{ item }}"
-  loop:
-    - "{{ mac_node_home }}/.local/bin/docker"
-    - "{{ mac_node_home }}/.local/bin/godot"
-  register: _claude_md_probe
-  check_mode: false
-
-- name: 整理偵測結果
-  ansible.builtin.set_fact:
-    mac_node_have_docker_compat: "{{ _claude_md_probe.results[0].stat.exists }}"
-    mac_node_have_godot: "{{ _claude_md_probe.results[1].stat.exists }}"
-
-- name: ~/.claude/CLAUDE.md 的 managed block
-  ansible.builtin.blockinfile:
-    path: "{{ mac_node_home }}/.claude/CLAUDE.md"
-    create: true
+- name: 整台電腦層的 CLAUDE.md
+  ansible.builtin.template:
+    src: claude-md.j2
+    dest: "{{ mac_node_claude_managed_dir }}/CLAUDE.md"
+    owner: root
+    group: wheel
     mode: "0644"
-    marker: "<!-- {mark} mac-bootstrap (managed) -->"
-    block: "{{ lookup('ansible.builtin.template', 'claude-md.j2') }}"

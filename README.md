@@ -28,13 +28,14 @@ make verify
 | `make uninstall TAGS=… DATA=1` | 連資料一起清（快取、下載的 runtime、podman 的 VM 磁碟） |
 | `make verify` | 驗收清單裡能自動檢查的部分（唯讀） |
 
-TAGS 可以一次給多個：`TAGS=go,node`。碰到 system 層（`hostname`、`power`、`softwareupdate`、`sshd`）會自動問 sudo 密碼。
+TAGS 可以一次給多個：`TAGS=go,node`。碰到 system 層（`hostname`、`power`、`softwareupdate`、`sshd`、`claude-md`、`claude-guard`）會自動問 sudo 密碼。
 
 ## 項目
 
 | 類別 | tag |
 |---|---|
-| Remote Control | `claude`、`tmux`、`claude-rc`、`claude-md`、`claude-guard`（要裝東西先問） |
+| Remote Control | `claude`、`tmux`、`claude-rc` |
+| Claude 的整台電腦層（sudo） | `claude-md`（這台的規矩）、`claude-guard`（要裝東西先問） |
 | 連線與身分 | `tailscale`、`authorized-keys`、`ssh-keys`、`git-identity`、`sshd` |
 | 常駐節點 | `power`、`softwareupdate`、`hostname`、`arrive-home` |
 | 語言與容器 | `go`、`python`（只有 uv）、`node`、`pnpm`、`rust`、`podman`、`docker-compat` |

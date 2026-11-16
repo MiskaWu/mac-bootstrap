@@ -21,8 +21,8 @@
     - { tag: podman,          path: "{{ mac_node_brew_prefix }}/bin/podman",                                     desc: "podman（brew；machine 只建不啟動）" }
     - { tag: docker-compat,   path: "{{ mac_node_home }}/.local/bin/docker",                                     desc: "Docker 相容（podman compose 用 docker-compose；docker → podman）" }
     - { tag: godot,           path: "{{ mac_node_home }}/.local/bin/godot",                                      desc: "Godot {{ godot_versions | join('、') }}（官方 build，多版本並存）" }
-    - { tag: claude-guard,    path: "{{ mac_node_home }}/.claude/settings.json",                                 desc: "要裝東西先問（permissions.ask；狀態看 make verify）" }
-    - { tag: claude-md,      path: "{{ mac_node_home }}/.claude/CLAUDE.md",                                     desc: "~/.claude/CLAUDE.md 裡這台的規矩（managed block）" }
+    - { tag: claude-guard,    path: "{{ mac_node_claude_managed_dir }}/managed-settings.d/mac-bootstrap.json", desc: "要裝東西先問（sudo；整台電腦層的 permissions.ask）" }
+    - { tag: claude-md,       path: "{{ mac_node_claude_managed_dir }}/CLAUDE.md",                               desc: "這台的規矩（sudo；整台電腦層的 CLAUDE.md）" }
     - { tag: profile,         path: "{{ mac_node_home }}/.config/mac-bootstrap/env.zsh",                         desc: "PATH（~/.zshenv 與 ~/.zprofile 各 source 一次）" }
     - { tag: claude-rc,       path: "{{ mac_node_home }}/Library/LaunchAgents/{{ claude_rc_label }}.plist",     desc: "Remote Control 常駐伺服器（LaunchAgent + tmux）" }
     - { tag: hostname,        path: /dev/null,                                                                    desc: "主機名稱（sudo；設定類，看 make verify）" }

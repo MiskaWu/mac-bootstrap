@@ -61,8 +61,8 @@ mac-bootstrap/
 | `rust` | user | 官方 rustup-init `--no-modify-path` | 同 Linux 的拆法：`~/.rustup` 整包、`~/.cargo` 拆開；config/credentials 永遠保留 |
 | `docker-compat` | user | brew `docker-compose`（`podman compose` 的 provider）、`~/.local/bin/docker`（`exec podman` 的 shim）、`containers.conf` 關掉 provider 提示。引擎與指令都是 podman | brew 移除、刪 shim（只刪自己放的）、拿掉設定；檔案空了就刪 |
 | `godot` | user | 官方 zip（SHA512-SUMS 驗證）→ `~/Applications/Godot-<版本>.app`；`godot_versions` 列幾個裝幾個，清單外的刪掉；`godot-<版本>` 與 `godot` 指令 | 刪所有版本與指令（Godot 開著就拒絕）；DATA=1 刪編輯器設定與匯出範本 |
-| `claude-guard` | user | `~/.claude/settings.json` 的 `permissions.ask` 加上安裝類指令與 `sudo`（聯集，只在有不同時寫回；其餘內容原樣） | 只拿掉自己那幾條；空了拿掉 key，整個 `{}` 就刪檔 |
-| `claude-md` | user | `~/.claude/CLAUDE.md` 的 managed block（這台的規矩；Godot、Docker 相容那兩段裝了才寫） | 拿掉 block；只剩空白就刪檔。移除別的 tag 時會依現況重生 |
+| `claude-guard` | system | 整台電腦層 `/Library/Application Support/ClaudeCode/managed-settings.d/mac-bootstrap.json` 的 `permissions.ask`：安裝類指令與 `sudo`，「指令開頭」與「前面接路徑」兩種寫法各一條 | 刪檔；目錄空了才刪 |
+| `claude-md` | system | 整台電腦層 `/Library/Application Support/ClaudeCode/CLAUDE.md`：只有這台成立的細節（跨電腦的原則在 claude-config 的 `rules/tools-and-versions.md`）。固定文字，不看裝了什麼 | 刪檔；目錄空了才刪 |
 | `profile` | user | `env.zsh`，由 `~/.zshenv` 與 `~/.zprofile` 各 source 一次 | 拿掉兩個 block、刪 env.zsh；rc 檔只剩空白就刪 |
 | `hostname` | system | 三個 `scutil --set` | 沒有「移除」：改 config 的名字再 install（Makefile 印說明） |
 | `power` | system | `pmset -c`（不同才改）、蓋子模式 | 收斂回 config 的 `mac_node_pmset_ac_original` |
@@ -110,6 +110,8 @@ mac-bootstrap/
 18. **`make … EXTRA='-e {"k":[…]}'` 的 JSON 會被 shell 拆掉**（recipe 裡沒加引號，雙引號被吃掉，什麼都沒覆蓋也不報錯）→ 臨時覆蓋變數寫成檔案：`EXTRA="-e @/tmp/x.yml"`。
 19. **verify 不准有副作用**：`cargo install --list` 會建出空的 `~/.cargo/.crates.toml` / `.crates2.json`；`pnpm ls -g` 會建出 `~/Library/pnpm/bin` → 直接讀它們的清單檔。
 20. **Go 的 `toolchain` 只會往新版切**：go.mod 寫比主機舊的版本不會降版，要舊版得帶 `GOTOOLCHAIN=go1.x.y`。**pnpm 的 devEngines.runtime 只對 `pnpm exec` / `pnpm run` 生效**，直接打 `node` 還是主機的。
+21. **Claude 的規矩與護欄分三層，依「管到誰」放**：每台電腦都成立的放個人層（`~/.claude`，由 claude-config 共用到 Mac、WSL、Windows）；只有這台成立的放整台電腦層（`/Library/Application Support/ClaudeCode/`，這個 repo 的 system 層）；只有某個 repo 成立的放那個 repo。**這個 repo 不准寫 `~/.claude`**（那是共用 repo 的連結）。整台電腦層只用最高的 managed 來源：有 MDM 描述檔或組織後台政策時，這裡的檔會被整個略過。
+22. **護欄規則開頭不要加 `*`**：`Bash(*sudo *)` 連引號裡的文字也比對到（實測 `grep "要 sudo 的"` 被攔）。用「指令開頭」與「`*/` 接路徑」兩種寫法。
 
 ## 手動的事（刻意不自動化）
 

@@ -17,3 +17,12 @@
 - name: sshd 只允許金鑰登入
   ansible.builtin.import_tasks: sshd.yml
   tags: [system, sshd]
+
+# Claude 的整台電腦層（/Library/Application Support/ClaudeCode）。~/.claude 是個人層，留給 claude-config。
+- name: 這台的規矩（整台電腦層的 CLAUDE.md）
+  ansible.builtin.import_tasks: claude-md.yml
+  tags: [system, claude-md]
+
+- name: 要裝東西先問（整台電腦層的 managed-settings.d）
+  ansible.builtin.import_tasks: claude-guard.yml
+  tags: [system, claude-guard]

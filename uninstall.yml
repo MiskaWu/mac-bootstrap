@@ -37,28 +37,6 @@
       when: "'profile' not in ansible_run_tags"
       tags: always
 
-    # 規矩裡「裝了才寫」的段落（Godot、Docker 相容）跟著移除。只在 block 本來就在時重生，
-    # 不會因為移除別的東西而把 claude-md 裝回來。
-    - name: ~/.claude/CLAUDE.md 的規矩在不在
-      ansible.builtin.command:
-        argv: [/usr/bin/grep, -q, "BEGIN mac-bootstrap (managed)", "{{ ansible_facts.env.HOME }}/.claude/CLAUDE.md"]
-      register: _u_claude_md_present
-      changed_when: false
-      failed_when: false
-      when: "'claude-md' not in ansible_run_tags"
-      tags: always
-
-    - name: ~/.claude/CLAUDE.md 的規矩（依移除後的機器現況重生）
-      ansible.builtin.include_role:
-        name: mac_node
-        tasks_from: claude-md.yml
-        apply:
-          tags: always
-      when:
-        - "'claude-md' not in ansible_run_tags"
-        - _u_claude_md_present.rc | default(1) == 0
-      tags: always
-
 - name: mac_node system 移除（要 sudo）
   hosts: all
   gather_facts: false

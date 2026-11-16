@@ -67,15 +67,104 @@ podman_machine_cpus: 4
 podman_machine_memory: 8192
 podman_machine_disk: 100
 
+# ---- Claude 的整台電腦層（tasks/claude-md.yml、claude-guard.yml，system 層）----------
+# 官方的 managed 位置（docs: memory、managed-settings）。這台的規矩與護欄放這裡，~/.claude 留給 claude-config。
+mac_node_claude_managed_dir: /Library/Application Support/ClaudeCode
+# 規矩裡寫的 IaC repo 位置（= 這個 repo）
+mac_node_repo_dir: "{{ playbook_dir }}"
+
 # ---- 要裝東西先問（tasks/claude-guard.yml）-------------------------------------
-# 加進 ~/.claude/settings.json 的 permissions.ask。比對規則（code.claude.com/docs/en/permissions）：
+# 寫進整台電腦層的 managed-settings.d/mac-bootstrap.json 的 permissions.ask。比對規則（code.claude.com/docs/en/permissions）：
 #   - `*` 可以放在任何位置；開頭的 `*` 讓絕對路徑（/opt/homebrew/bin/brew …）也對得上。
 #   - `a && b`、`a | b` 會拆開逐段比對，任何一段對上就問 → `curl … | sh` 會以 `sh` 對上。
 #   - 前面帶環境變數（`FOO=1 brew install x`）照樣對得上。
 #   - 自動模式也會問；ask 排在 allow 前面，專案設定的 allow 蓋不過它。
 # 刻意不問的：專案層級的版本下載（uv run、pnpm exec、rustup 依 rust-toolchain.toml、go 的 toolchain）、
 # podman 容器裡的 apt —— 它們不落在主機的全域環境。
-claude_guard_ask:
+# 規則只比對兩種寫法：指令開頭（`brew install x`）與前面接路徑（`/opt/homebrew/bin/brew install x`）。
+# 不用開頭的 `*`：它連引號裡的文字也比對（實測 `grep "要 sudo 的"` 被 `*sudo *` 攔下）。
+# 前面帶 env 賦值（`FOO=1 brew install`）時 ask 規則照樣對得上（docs）。
+# 下面每一項是「指令開頭」，會各自展開成 `Bash(<開頭>*)` 與 `Bash(*/<開頭>*)` 兩條。
+claude_guard_ask_commands:
+  # 主機套件管理
+  - "brew install "
+  - "brew reinstall "
+  - "brew upgrade"
+  - "brew uninstall "
+  - "brew tap "
+  - "brew link "
+  - "brew bundle"
+  - "installer -pkg"
+  - "softwareupdate -i"
+  - "softwareupdate --install"
+  - "sudo "
+  # 透過 IaC 或專案的 make 裝到主機（這也是改主機，照樣先問）
+  - "make install"
+  - "make uninstall"
+  - "ansible-playbook "
+  # 語言的全域安裝
+  - "npm install -g"
+  - "npm i -g"
+  - "npm install --global"
+  - "npm i --global"
+  - "npm link"
+  - "pnpm add -g"
+  - "pnpm add --global"
+  - "pnpm install -g"
+  - "pnpm i -g"
+  - "pnpm link --global"
+  - "pnpm env "
+  - "yarn global "
+  - "pip install "
+  - "pip3 install "
+  - "python -m pip install "
+  - "python3 -m pip install "
+  - "pipx install "
+  - "uv tool install "
+  - "cargo install "
+  - "cargo binstall "
+  - "rustup default "
+  - "go install"
+  - "gem install "
+  # 下載下來交給 shell 跑的安裝程式（Homebrew 官方那種 bash -c "$(curl …)"）
+  - "bash -c *curl "
+  - "sh -c *curl "
+  - "zsh -c *curl "
+  - "bash -c *wget "
+  - "sh -c *wget "
+# 不是「指令開頭」形式的，原樣加入。
+claude_guard_ask_extra:
+  # 旗標在套件名稱後面的全域安裝（npm install foo -g）
+  - "Bash(npm install * -g*)"
+  - "Bash(npm i * -g*)"
+  - "Bash(pnpm add * -g*)"
+  # `curl … | sh`：管線會拆開逐段比對，以「單獨一個 sh」對上
+  - "Bash(sh)"
+  - "Bash(bash)"
+  - "Bash(zsh)"
+  - "Bash(*/sh)"
+  - "Bash(*/bash)"
+  - "Bash(*/zsh)"
+  - "Bash(sh -s*)"
+  - "Bash(bash -s*)"
+  # 主機的設定檔與 PATH 上的目錄（這些由 IaC 管）。Edit 規則也涵蓋 Write。
+  - "Edit(~/.zshenv)"
+  - "Edit(~/.zprofile)"
+  - "Edit(~/.zshrc)"
+  - "Edit(~/.bashrc)"
+  - "Edit(~/.bash_profile)"
+  - "Edit(~/.profile)"
+  - "Edit(~/Library/LaunchAgents/**)"
+  - "Edit(~/.local/bin/**)"
+  - "Edit(~/bin/**)"
+claude_guard_ask: >-
+  {{ (['Bash('] | product(claude_guard_ask_commands) | map('join') | map('regex_replace', '$', '*)') | list)
+     + (['Bash(*/'] | product(claude_guard_ask_commands) | map('join') | map('regex_replace', '$', '*)') | list)
+     + claude_guard_ask_extra }}
+
+# 過渡用：2026-11-16 放在 ~/.claude/settings.json 的舊版清單（開頭加 * 的寫法，會連引號裡的字一起比對到）。
+# 只給 make uninstall TAGS=claude-guard-user-legacy 拿掉舊規則用；遷移完跟那段一起刪。
+claude_guard_ask_legacy:
   # 主機套件管理
   - "Bash(*brew install *)"
   - "Bash(*brew reinstall *)"

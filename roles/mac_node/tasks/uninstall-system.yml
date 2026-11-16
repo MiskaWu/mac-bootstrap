@@ -6,6 +6,40 @@
 #     mac_computer_name / mac_host_name 再 make install TAGS=hostname（原名記在 SETUP-LOG）。
 #   Makefile 的 _check-uninstall-tags 會對它印出這段說明，而不是「沒有這個 tag」。
 
+# ---- Claude 的整台電腦層（/Library/Application Support/ClaudeCode）------------
+# 只刪 mac-bootstrap 自己的那兩個檔；目錄空了才刪（別的東西放在那裡就留著）。
+- name: 要裝東西先問（managed-settings.d/mac-bootstrap.json）
+  tags: [claude-guard]
+  block:
+    - name: 刪 managed-settings.d/mac-bootstrap.json
+      ansible.builtin.file:
+        path: "{{ mac_node_claude_managed_dir }}/managed-settings.d/mac-bootstrap.json"
+        state: absent
+
+    - name: managed-settings.d 空了就刪
+      ansible.builtin.command:
+        argv: [/bin/rmdir, "{{ mac_node_claude_managed_dir }}/managed-settings.d"]
+      register: _u_guard_rmdir
+      changed_when: _u_guard_rmdir.rc == 0
+      failed_when: false
+
+- name: 這台的規矩（整台電腦層的 CLAUDE.md）
+  tags: [claude-md]
+  block:
+    - name: 刪 CLAUDE.md
+      ansible.builtin.file:
+        path: "{{ mac_node_claude_managed_dir }}/CLAUDE.md"
+        state: absent
+
+# 兩個 tag 都可能是最後一個離開的：各自試著收掉上層目錄，不空就留著。
+- name: ClaudeCode 目錄空了就刪
+  ansible.builtin.command:
+    argv: [/bin/rmdir, "{{ mac_node_claude_managed_dir }}"]
+  register: _u_claude_dir_rmdir
+  changed_when: _u_claude_dir_rmdir.rc == 0
+  failed_when: false
+  tags: [claude-md, claude-guard]
+
 # ---- sshd 只收金鑰 -----------------------------------------------------------
 - name: sshd 硬化設定
   tags: [sshd]

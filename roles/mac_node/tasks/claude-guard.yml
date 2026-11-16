@@ -1,42 +1,33 @@
 ---
-# 「要裝東西先問我」：在 ~/.claude/settings.json 的 permissions.ask 加上安裝類的指令。
-# 這台上的每個 Claude 工作階段（手機經 Remote Control、Desktop、終端機）碰到這些指令都會先
-# 跳出詢問，Miska 在手機上按允許或拒絕。雲端工作階段不讀這個檔，本來就碰不到這台。
+# 「要裝東西先問」：Claude Code 官方的「整台電腦層」設定（docs: managed-settings）。
+#   /Library/Application Support/ClaudeCode/managed-settings.d/mac-bootstrap.json
+# 這台上每個 Claude 工作階段（手機經 Remote Control、Desktop、終端機）碰到這些指令都會先跳出詢問。
+# 雲端工作階段不讀這個檔，本來就碰不到這台。
 #
-# 為什麼放使用者設定、不用 `claude remote-control --settings <file>`：--settings 只在伺服器啟動時
-# 讀一次（改了要重啟 Remote Control，會切斷所有遠端工作階段），而且帶了它，Remote Control
-# 原本替工作階段打開的自動模式、auto-compact 就不會開（`claude remote-control --help`）。
+# 為什麼放這一層（docs: settings、permissions、managed-settings）：
+#   - 個人層的 ~/.claude/settings.json 由 claude-config 共用到每一台，這台專用的規則放那裡會跟著到 WSL。
+#   - 「沒有任何其他層，包括命令列，能推翻 managed 的權限規則」，而且 list 會跟個人層合併，不互相取代。
+#   - 檔案屬於 root：工作階段沒有 sudo 密碼就改不到（放在 ~/.claude 的話，工作階段自己就能刪掉）。
+# 用 managed-settings.d/ 的分檔、不寫 managed-settings.json：mac-bootstrap 只擁有自己這一份，
+# 移除時刪這個檔就好。
 #
-# 只管自己的那幾條：讀現有 JSON → 原有的在前、缺的接在後面（不用 union：它不保證順序，
-# 重跑會判成有變化）→ 有不同才寫回。檔案其餘內容（Miska 自己的設定、
-# 用 /config 改的）原樣保留，key 順序不動。
+# 注意（docs）：系統只用「最高的那一個 managed 來源」。這台之後若有後台政策（組織帳號）或 MDM 描述檔，
+# 這個檔會被整個略過、不會警告（/status 的 Setting sources 看得到）。make verify 只能確認檔案在。
 #
-# 這是**護欄，不是安全邊界**：規則比對的是指令文字，換個寫法（絕對路徑、包進腳本）就可能
-# 繞過。另外兩層是 ~/.claude/CLAUDE.md 的規矩（TAGS=claude-md）與 make verify 的漂移檢查。
-- name: ~/.claude
+# 這是**護欄，不是安全邊界**：規則比對的是指令文字，包進腳本就可能繞過。
+# 另外兩層是規矩（TAGS=claude-md）與 make verify 的漂移檢查。
+- name: /Library/Application Support/ClaudeCode/managed-settings.d
   ansible.builtin.file:
-    path: "{{ mac_node_home }}/.claude"
+    path: "{{ mac_node_claude_managed_dir }}/managed-settings.d"
     state: directory
+    owner: root
+    group: wheel
+    mode: "0755"
 
-- name: 讀 ~/.claude/settings.json
-  ansible.builtin.slurp:
-    src: "{{ mac_node_home }}/.claude/settings.json"
-  register: _guard_raw
-  failed_when: false
-  check_mode: false
-
-- name: 算出加上護欄之後的內容
-  ansible.builtin.set_fact:
-    _guard_cur: "{{ _cur }}"
-    _guard_new: >-
-      {{ _cur | combine({'permissions': _perms | combine({'ask': ((_perms.ask | default([])) + claude_guard_ask) | unique})}) }}
-  vars:
-    _cur: "{{ (_guard_raw.content | b64decode | from_json) if (_guard_raw.content is defined) else {} }}"
-    _perms: "{{ _cur.permissions | default({}) }}"
-
-- name: 寫回 ~/.claude/settings.json（只在有不同時）
+- name: managed-settings.d/mac-bootstrap.json
   ansible.builtin.copy:
-    content: "{{ _guard_new | to_nice_json(indent=2, sort_keys=False) }}\n"
-    dest: "{{ mac_node_home }}/.claude/settings.json"
+    content: "{{ {'permissions': {'ask': claude_guard_ask}} | to_nice_json(indent=2, sort_keys=False) }}\n"
+    dest: "{{ mac_node_claude_managed_dir }}/managed-settings.d/mac-bootstrap.json"
+    owner: root
+    group: wheel
     mode: "0644"
-  when: _guard_new != _guard_cur

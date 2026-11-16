@@ -268,26 +268,45 @@
         [ -n "$out" ] || { echo "沒有裝任何語言工具"; exit 0; }
         echo "${out# }"
 
-    - name: "~/.claude/CLAUDE.md 有這台的規矩"
+    # ---- Claude 的整台電腦層（/Library/Application Support/ClaudeCode）----
+    - name: "這台的規矩（整台電腦層的 CLAUDE.md）"
       level: warn
       cmd: |
-        f="$HOME/.claude/CLAUDE.md"
-        /usr/bin/grep -q 'BEGIN mac-bootstrap (managed)' "$f" 2>/dev/null || { echo "沒有（make install TAGS=claude-md）"; exit 1; }
-        echo "有"
+        f={{ (mac_node_claude_managed_dir ~ '/CLAUDE.md') | quote }}
+        [ -f "$f" ] || { echo "沒有（make install TAGS=claude-md，要 sudo）"; exit 1; }
+        o=$(/usr/bin/stat -f '%Su' "$f")
+        [ "$o" = root ] || { echo "擁有者是 ${o}，應為 root（make install TAGS=claude-md）"; exit 1; }
+        /usr/bin/grep -q 'mac-bootstrap' "$f" || { echo "不是 mac-bootstrap 產生的"; exit 1; }
+        echo "有（root 所有）"
 
     # 規則用 plutil 讀（JSON 也吃），輸出的 / 會跳脫成 \/，比對前換回來。
-    - name: "要裝東西先問（~/.claude/settings.json 的 permissions.ask）"
+    - name: "要裝東西先問（整台電腦層的 managed-settings.d）"
       level: warn
       cmd: |
-        f="$HOME/.claude/settings.json"
-        [ -f "$f" ] || { echo "沒有 settings.json（make install TAGS=claude-guard）"; exit 1; }
+        f={{ (mac_node_claude_managed_dir ~ '/managed-settings.d/mac-bootstrap.json') | quote }}
+        [ -f "$f" ] || { echo "沒有（make install TAGS=claude-guard，要 sudo）"; exit 1; }
         ask=$(/usr/bin/plutil -extract permissions.ask json -o - "$f" 2>/dev/null | sed 's#\\/#/#g' || true)
         n=0; missing=""
         {% for r in claude_guard_ask %}
         if /usr/bin/grep -qF -- {{ ('"' ~ r ~ '"') | quote }} <<<"$ask"; then n=$((n + 1)); else missing="$missing {{ r | quote }}"; fi
         {% endfor %}
         [ -z "$missing" ] || { echo "少了 $(echo $missing | wc -w | tr -d ' ') 條（make install TAGS=claude-guard）：${missing# }"; exit 1; }
+        # 系統只用最高的 managed 來源（docs: managed-settings）。有 MDM 描述檔時，這個檔會被整個略過。
+        # 後台政策（組織帳號）從這裡查不到，要在工作階段裡看 /status 的 Setting sources。
+        if [ -e "/Library/Managed Preferences/com.anthropic.claudecode.plist" ]; then
+          echo "檔案在（${n} 條），但這台有 MDM 描述檔 com.anthropic.claudecode：這個檔會被略過"; exit 1
+        fi
         echo "${n} 條安裝類指令會先問"
+
+    # 過渡：2026-11-16 以前放在 ~/.claude（個人層）。搬到整台電腦層之後要拿掉，否則接上 claude-config 時會一起進共用 repo。
+    - name: "~/.claude 沒有舊版的規矩與護欄"
+      level: warn
+      cmd: |
+        left=""
+        /usr/bin/grep -q 'BEGIN mac-bootstrap (managed)' "$HOME/.claude/CLAUDE.md" 2>/dev/null && left="$left CLAUDE.md 的 block"
+        /usr/bin/grep -qF {{ ('"' ~ (claude_guard_ask_legacy | first) ~ '"') | quote }} "$HOME/.claude/settings.json" 2>/dev/null && left="$left settings.json 的護欄"
+        [ -z "$left" ] || { echo "還有：${left# }（make uninstall TAGS=claude-guard-user-legacy,claude-md-user-legacy）"; exit 1; }
+        echo "沒有"
 
     - name: "全域 git 身分"
       level: fail
