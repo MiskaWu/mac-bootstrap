@@ -61,10 +61,10 @@ pnpm_global_shims: false
 rust_profile: minimal
 rust_components: [rustfmt, clippy]
 # podman machine：只建不啟動，用到時才 `podman machine start`（Miska 核准：不開機自動啟動）。
-# 配額：64 GB 的機器，給 VM 8 GB。記憶體單位 MiB、磁碟 GiB。
+# 配額：16 核心、64 GB 的機器，給 VM 8 核心、16 GB（2026-11-16 為了服務開發調高；改了再 make install TAGS=podman 會套到現有的 VM）。記憶體單位 MiB、磁碟 GiB。上限碰過就不還給主機，不要設超過同時要跑的服務需要的量。
 podman_machine_name: podman-machine-default
-podman_machine_cpus: 4
-podman_machine_memory: 8192
+podman_machine_cpus: 8
+podman_machine_memory: 16384
 podman_machine_disk: 100
 
 # ---- Claude 的整台電腦層（tasks/claude-md.yml、claude-guard.yml，system 層）----------

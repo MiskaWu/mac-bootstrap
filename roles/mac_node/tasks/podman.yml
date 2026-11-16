@@ -38,3 +38,52 @@
   when:
     - not ansible_check_mode
     - _podman_machine.rc != 0
+
+# ---- 已經有 machine：配額跟設定不同就調 -------------------------------------
+# podman machine set 要在機器停著時跑：開著就先停、調完再開回來（跑在裡面的容器會被停掉）。
+# 磁碟只能加大，這裡不動它。
+# 記憶體上限不是「用多少佔多少」：VM 碰過的記憶體（含檔案快取）不會還給主機
+# （2026-11-16 實測：VM 裡只用不到 1 GB，krunkit 在主機佔 8.3 GB）。上限設多少，開著時主機就少多少。
+- name: 現在的配額
+  ansible.builtin.set_fact:
+    _podman_now: "{{ (_podman_machine.stdout | from_json)[0] }}"
+  when:
+    - not ansible_check_mode
+    - _podman_machine.rc == 0
+
+- name: 配額要不要調
+  ansible.builtin.set_fact:
+    _podman_resize: >-
+      {{ (_podman_now.Resources.CPUs | int) != (podman_machine_cpus | int)
+         or (_podman_now.Resources.Memory | int) != (podman_machine_memory | int) }}
+  when: _podman_now is defined
+
+- name: 調配額前先停 machine
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/podman", machine, stop, "{{ podman_machine_name }}"]
+  changed_when: true
+  when:
+    - _podman_resize | default(false)
+    - _podman_now.State == 'running'
+
+- name: podman machine set（CPU {{ podman_machine_cpus }}、記憶體 {{ podman_machine_memory }} MiB）
+  ansible.builtin.command:
+    argv:
+      - "{{ mac_node_brew_prefix }}/bin/podman"
+      - machine
+      - set
+      - --cpus
+      - "{{ podman_machine_cpus }}"
+      - --memory
+      - "{{ podman_machine_memory }}"
+      - "{{ podman_machine_name }}"
+  changed_when: true
+  when: _podman_resize | default(false)
+
+- name: 原本開著的開回來
+  ansible.builtin.command:
+    argv: ["{{ mac_node_brew_prefix }}/bin/podman", machine, start, "{{ podman_machine_name }}"]
+  changed_when: true
+  when:
+    - _podman_resize | default(false)
+    - _podman_now.State == 'running'
