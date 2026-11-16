@@ -37,7 +37,7 @@ mac-bootstrap/
     │   ├── detect.yml  list.yml  verify.yml        # list / verify 是 [x, never]
     │   ├── tmux  claude  claude-rc  tailscale  git-identity  ssh-keys  authorized-keys
     │   ├── arrive-home  go  python  node  pnpm  rust  podman  docker-compat  godot  claude-md  profile
-    │   ├── codex
+    │   ├── codex  chrome-headless-shell
     │   ├── bash  awscli  gh
     │   └── hostname  power  softwareupdate  sshd
     └── templates/  env.zsh.j2  claude-rc-server.sh.j2  local.claude-rc.plist.j2
@@ -66,6 +66,7 @@ mac-bootstrap/
 | `docker-compat` | user | brew `docker-compose`（`podman compose` 的 provider）、`~/.local/bin/docker`（`exec podman` 的 shim）、`containers.conf` 關掉 provider 提示。引擎與指令都是 podman | brew 移除、刪 shim（只刪自己放的）、拿掉設定；檔案空了就刪 |
 | `godot` | user | 官方 zip（SHA512-SUMS 驗證）→ `~/Applications/Godot-<版本>.app`；`godot_versions` 列幾個裝幾個，清單外的刪掉；`godot-<版本>` 與 `godot` 指令 | 刪所有版本與指令（Godot 開著就拒絕）；DATA=1 刪編輯器設定與匯出範本 |
 | `codex` | user | OpenAI 官方 release 的完整套件 `codex-package-aarch64-apple-darwin.tar.gz`（tag `rust-v<版本>`，`codex_version` pin，對官方的 `codex-package_SHA256SUMS` 驗證）→ `~/.local/codex-<版本>`，`~/.local/bin/codex` 是連到裡面 `bin/codex` 的 symlink；附屬程式（`codex-code-mode-host`、`rg`）留在套件裡。裝完與 `make verify` 都檢查 `codex-code-mode-host` 在 codex 會去找的位置而且起得來。easel 生圖用（easel 在 macOS 用內建 sips 做縮圖，只需要 codex）。登入是手動的事 | 刪 symlink（只刪自己放的）與所有 `~/.local/codex-<版本>`；`~/.codex` 拆開：`auth.json`、`config.toml`、`AGENTS.md`、`.env`、`sessions`（對話紀錄，easel 改圖要接回去）永遠保留，DATA=1 刪生出來的圖、輸入紀錄、log、快取、暫存；沒列到的不動並印出來 |
+| `chrome-headless-shell` | user | Google 的 Chrome for Testing 發的 `chrome-headless-shell-mac-arm64.zip`（`chrome_headless_shell_version` pin；官方沒有 checksum，對 defaults 裡一起 pin 的 `chrome_headless_shell_sha256` 驗證，換版本兩個值一起改）→ `~/.local/chrome-headless-shell-<版本>`，`~/.local/bin/chrome-headless-shell` 是 exec 到裡面執行檔的轉接腳本（不能用 symlink，見地雷 26；腳本裡有 `# mac-bootstrap: chrome-headless-shell <版本>` 這行標記）。jury 的截圖腳本拍 390 寬的手機截圖用（見地雷 25）。裝完與 `make verify` 都檢查版本，並真的開一次 390 寬的頁面確認 `innerWidth` 是 390 | 刪轉接腳本（只刪帶標記的）與所有 `~/.local/chrome-headless-shell-<版本>`；沒有自己的資料 |
 | `bash` | user | brew 的 bash 5。不改 PATH、不改 shebang：靠 `env.zsh` 把 `/opt/homebrew/bin` 排在 `/bin` 前面，`#!/usr/bin/env bash` 就拿到 5.x（`make verify` 檢查 ssh 與 launchd 兩種情境）。寫死 `/bin/bash` 的照舊是 3.2 | brew 移除（登入 shell 是它就拒絕，防鎖死） |
 | `awscli` / `gh` | user | brew。登入是手動的事：`aws configure sso`、`gh auth login` | brew 移除；**登入設定與長期秘密永遠不自動刪**（`~/.aws/config`、`~/.aws/credentials`、`~/.config/gh`，同私鑰的理由）；DATA=1 只刪會自己過期的 SSO token 快取、gh 的擴充與快取 |
 | `claude-guard` | system | 整台電腦層 `/Library/Application Support/ClaudeCode/managed-settings.d/mac-bootstrap.json` 的 `permissions.ask`：安裝類指令與 `sudo`，「指令開頭」與「前面接路徑」兩種寫法各一條 | 刪檔；目錄空了才刪 |
@@ -121,6 +122,8 @@ mac-bootstrap/
 22. **護欄規則開頭不要加 `*`**：`Bash(*sudo *)` 連引號裡的文字也比對到（實測 `grep "要 sudo 的"` 被攔）。用「指令開頭」與「`*/` 接路徑」兩種寫法。
 23. **`codex` 每次執行都會寫 `~/.codex`**，連 `--version` 也是：解析參數之前就先建 `$CODEX_HOME/tmp/arg0-macos`（讀 0.167.0 的 `codex-rs/arg0/src/lib.rs` 確認）。只是要讀版本（安裝後的斷言、`make verify`）就給它一個用完即丟的 `CODEX_HOME`。
 24. **只放 `codex` 一個執行檔（單檔版）生不了圖**（2026-11-16 實測）：內建的 image_gen 走 code mode，要另一支 `codex-code-mode-host`；單檔版 `codex --version` 正常，生圖時才報「failed to spawn code-mode host …: host executable was not found」。一定要裝完整套件（`codex-package-*`）。codex 找它的規則在 `codex-rs/install-context/src/lib.rs`：把自己的路徑解到底（symlink 會解開），所在目錄叫 `bin`、上一層有 `codex-package.json` 才算套件配置，再找 `codex-resources/`、`bin/`。檢查要看「easel 真正要的東西在不在」，不是「`--version` 會不會動」；檢查內容只有一份，在 defaults 的 `mac_node_codex_*_probe`。
+25. **為什麼不用已經裝好的 Google Chrome 截手機圖**（2026-11-16 實測）：Google Chrome 的無頭模式（新版 `--headless`）視窗最窄只能 500，指定 `--window-size=390` 時 `innerWidth` 是 500，截出來的圖右邊被切掉，**而且不會報錯**。chrome-headless-shell 是舊版的無頭模式（獨立的執行檔），照指定的寬度排版；WSL 那台用的也是它（Playwright 下載的）。所以另外裝 `TAGS=chrome-headless-shell`，安裝後與 `make verify` 都真的開一次 390 寬的頁面讀 `innerWidth`（defaults 的 `mac_node_chs_width_probe`），不只看 `--version`。Chrome for Testing 沒有公布 checksum：sha256 是 pin 版本時自己下載算的，換版本時和版本號一起改。
+26. **chrome-headless-shell 不能經 symlink 叫**（2026-11-16 實測）：`~/.local/bin` 放 symlink 時，它照叫它的那條路徑找資源、不把 symlink 解開，stderr 印「icu_util.cc:188] icudtl.dat not found in bundle」後當掉（exit 133）；經實際路徑叫就正常。跟 codex 相反（codex 會把自己的路徑解到底，見地雷 24），不能照搬 codex 的 symlink 放法。`--version` 不載入資源，經 symlink 也正常，所以只看版本抓不到 —— 第一版就是這樣過了版本檢查、卡在 390 寬那段。現在 `~/.local/bin/chrome-headless-shell` 是轉接腳本（`exec <版本目錄的絕對路徑> "$@"`），帶一行標記註解，安裝與移除都認這行。
 
 ## 手動的事（刻意不自動化）
 

@@ -109,6 +109,14 @@
   ansible.builtin.import_tasks: codex.yml
   tags: [user, codex]
 
+# ---- 無頭截圖（jury 的手機截圖）-----------------------------------------------
+# jury 的 scripts/headless-chrome.sh 在 PATH 上找 chrome-headless-shell。一般 Google Chrome 的無頭模式
+# 最窄 500，390 寬的手機截圖會被切掉，所以另外裝這個（理由見 tasks/chrome-headless-shell.yml 檔頭）。
+# 掛在 profile 那行：它在 ~/.local/bin，要靠 env.zsh 把它放進 PATH。
+- name: chrome-headless-shell（Chrome for Testing，pin 版本與 sha256）
+  ansible.builtin.import_tasks: chrome-headless-shell.yml
+  tags: [user, chrome-headless-shell]
+
 # ---- 命令列工具（brew）--------------------------------------------------------
 # 專案腳本要用、又沒有「專案自己宣告版本」機制的工具。都掛在 profile 那行：bash 5 要靠
 # env.zsh 把 /opt/homebrew/bin 排在 /bin 前面才蓋得過 /bin/bash 3.2。
@@ -129,7 +137,7 @@
 # 內容看機器上實際有什麼（stat），不看開關。
 - name: PATH 環境設定（~/.zshenv + ~/.zprofile）
   ansible.builtin.import_tasks: profile.yml
-  tags: [user, profile, tmux, claude, claude-rc, go, python, node, pnpm, rust, podman, docker-compat, godot, codex, bash, awscli, gh]
+  tags: [user, profile, tmux, claude, claude-rc, go, python, node, pnpm, rust, podman, docker-compat, godot, codex, chrome-headless-shell, bash, awscli, gh]
 
 - name: Remote Control 常駐伺服器
   ansible.builtin.import_tasks: claude-rc.yml

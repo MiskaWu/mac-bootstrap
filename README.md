@@ -42,6 +42,7 @@ TAGS 可以一次給多個：`TAGS=go,node`。碰到 system 層（`hostname`、`
 | 語言與容器 | `go`、`python`（只有 uv）、`node`、`pnpm`、`rust`、`podman`、`docker-compat` |
 | 遊戲引擎 | `godot`（多版本並存） |
 | easel 的前置工具 | `codex`（OpenAI 官方 Codex CLI 的完整套件，pin 版本，放在 `~/.local/codex-<版本>`；只放一個執行檔的單檔版生不了圖）。easel 在 macOS 用內建 sips 做縮圖，只需要 codex |
+| 無頭截圖 | `chrome-headless-shell`（Chrome for Testing 的舊版無頭模式，pin 版本與 sha256，放在 `~/.local/chrome-headless-shell-<版本>`）。jury 拍 390 寬的手機截圖用：一般 Google Chrome 的無頭模式最窄 500，手機寬度的圖會被切掉 |
 | 命令列工具 | `bash`（brew 的 5.x，`#!/usr/bin/env bash` 會拿到它）、`awscli`、`gh` |
 | 環境 | `profile`（PATH，由其他 tag 自動帶） |
 

@@ -200,6 +200,8 @@
         [ -L "$HOME/.local/bin/godot" ] && want="$want godot"
         # easel 的前置工具（TAGS=codex）
         [ -x {{ mac_node_codex_bin | quote }} ] && want="$want codex"
+        # jury 的手機截圖（TAGS=chrome-headless-shell）：截圖腳本在 PATH 上找它
+        [ -x {{ mac_node_chs_bin | quote }} ] && want="$want chrome-headless-shell"
         # 命令列工具（TAGS=bash / awscli / gh）
         [ -x "$b/bash" ] && want="$want bash"
         [ -x "$b/aws" ] && want="$want aws"
@@ -299,6 +301,32 @@
         hp=$(host_probe 2>/dev/null) || bad="$bad ${hp}"
         [ -z "$bad" ] || { echo "不對：${bad# }（make install TAGS=codex）"; exit 1; }
         echo "codex ${cv##* }，code-mode-host 在 ${hp}"
+
+    # TAGS=chrome-headless-shell（jury 拍 390 寬的手機截圖）。沒裝回 0 並註明，不算失敗。
+    # 只看 --version 不夠：截圖要的是「指定 390 寬，版面就是 390 寬」—— 一般 Chrome 的無頭模式最窄 500，
+    # 指定 390 也照樣跑完、不報錯，圖右邊被切掉（2026-11-16 實測）。所以這裡看兩件事：版本，以及真的開一次
+    # 390 寬的頁面讀 innerWidth。兩段檢查的內容在 defaults 的 mac_node_chs_*_probe，安裝後的斷言用的是同一段。
+    # 寬度那段會起一次瀏覽器，設定檔放在用完就刪的暫存目錄（verify 不准有副作用）。
+    - name: "jury 的手機截圖（chrome-headless-shell 的版本與 390 寬）"
+      level: fail
+      cmd: |
+        c={{ mac_node_chs_bin | quote }}
+        [ -e "$c" ] || [ -L "$c" ] || { echo "沒有裝 chrome-headless-shell"; exit 0; }
+        # 經 symlink 叫會找不到 icudtl.dat、exit 133（2026-11-16 實測），這個 tag 放的是轉接腳本。
+        # 是 symlink 就直接講原因，不然只會看到下面寬度那段的「跑不起來（exit 133）」。
+        [ ! -L "$c" ] || { echo "${c} 是 symlink（→ $(/usr/bin/readlink "$c")）：會找不到 icudtl.dat，要換成轉接腳本（make install TAGS=chrome-headless-shell）"; exit 1; }
+        version_probe() {
+        {{ mac_node_chs_version_probe }}
+        }
+        width_probe() {
+        {{ mac_node_chs_width_probe }}
+        }
+        bad=""
+        cv=$(version_probe 2>/dev/null | tail -1)
+        [ "${cv##* }" = {{ chrome_headless_shell_version | quote }} ] || bad="$bad chrome-headless-shell=${cv:-跑不起來}（pin 的是 {{ chrome_headless_shell_version }}）"
+        wp=$(width_probe) || bad="$bad ${wp}"
+        [ -z "$bad" ] || { echo "不對：${bad# }（make install TAGS=chrome-headless-shell）"; exit 1; }
+        echo "chrome-headless-shell ${cv##* }，${wp}"
 
     # TAGS=bash / awscli / gh。不跑 aws、gh 本身：gh 第一次跑任何指令都可能寫出
     # ~/.config/gh/config.yml（設定版本的遷移；未實測，保守起見），verify 不准有副作用。

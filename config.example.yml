@@ -80,3 +80,11 @@ arrive_home_urls: []
 # 裝的是官方的完整套件（codex-package-*），對那個 release 公布的 codex-package_SHA256SUMS 驗證，
 # 所以只要給版本號。換了再 make install TAGS=codex：裝新版、切 symlink、刪舊版目錄。
 # codex_version: "0.169.0"
+
+# ---- chrome-headless-shell（TAGS=chrome-headless-shell）--------------------
+# 版本與 sha256 pin 在 defaults。只有這台要用別的版本才在這裡覆蓋。
+# Chrome for Testing 沒有公布 checksum，所以**兩個值要一起寫**：sha256 是自己下載那一版的 zip 算的
+# （shasum -a 256；網址格式見 defaults 的 chrome_headless_shell_url）。只改版本號，下載會因為 sha256 對不上而失敗。
+# 換了再 make install TAGS=chrome-headless-shell：裝新版、改寫 ~/.local/bin 的轉接腳本、刪舊版目錄。
+# chrome_headless_shell_version: "157.0.8103.78"
+# chrome_headless_shell_sha256: "<64 個十六進位字元>"

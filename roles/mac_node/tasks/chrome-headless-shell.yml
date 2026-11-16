@@ -1,0 +1,224 @@
+---
+# chrome-headless-shell：Google 的 Chrome for Testing（googlechromelabs.github.io/chrome-for-testing）
+# 發的 chrome-headless-shell-mac-arm64.zip，對 defaults 裡 pin 的 sha256 驗證後整包放到
+# ~/.local/chrome-headless-shell-<版本>，~/.local/bin/chrome-headless-shell 是一支轉接腳本，exec 到裡面的執行檔。
+# jury 的截圖腳本（scripts/headless-chrome.sh）在 PATH 上找這個名字，拍 390 寬的手機截圖給冷讀審查用。
+#
+# **為什麼不用已經裝好的 Google Chrome**（2026-11-16 實測）：一般 Chrome 的無頭模式（新版 --headless）
+# 視窗最窄只能 500，指定 --window-size=390 時 innerWidth 是 500，截出來的圖右邊被切掉，而且不會報錯。
+# chrome-headless-shell 是舊版的無頭模式（獨立的執行檔），照指定的寬度排版。WSL 那台用的也是它（Playwright 下載的）。
+# 所以裝完與 make verify 除了 --version，還真的開一次 390 寬的頁面看 innerWidth（defaults 的 mac_node_chs_width_probe）。
+#
+# zip 解開是這樣（有一層外層目錄 chrome-headless-shell-mac-arm64/）：
+#   chrome-headless-shell                 執行檔
+#   *.pak  icudtl.dat  v8_context_snapshot.arm64.bin  lib*.dylib …   執行時從執行檔所在目錄找
+#
+# **~/.local/bin 不能放 symlink，要放轉接腳本**（2026-11-16 實測）：經 symlink 執行時，它照叫它的那條路徑
+# 找資源、不把 symlink 解開，stderr 印「icu_util.cc:188] icudtl.dat not found in bundle」後當掉（exit 133）；
+# --version 不載入資源，照樣正常，所以只看版本抓不到。經實際路徑執行就正常。
+# 轉接腳本寫死版本目錄的絕對路徑再 exec，叫起來的就是實際路徑。腳本裡有一行固定的標記註解
+#（defaults 的 mac_node_chs_marker），安裝時的「是不是這裡放的」與移除都認這行。
+#
+# **Chrome for Testing 沒有公布 checksum**：sha256 是 pin 版本時自己下載算出來的，寫在 defaults。換版本時兩個值要一起改。
+# 不用 Playwright / Puppeteer 的下載器（npx …）：那是全域的下載快取，不在 IaC 裡，也移除不乾淨。
+# 不用 brew：沒有這個套件（cask 的 chromedriver、chromium 都不是它）。
+#
+# 這裡不建任何設定或資料目錄：截圖腳本每次用 --user-data-dir 給一個用完就刪的暫存設定檔。
+- name: chrome_headless_shell_sha256 要是 64 個十六進位字元
+  ansible.builtin.assert:
+    that: chrome_headless_shell_sha256 is match('^[0-9a-f]{64}$')
+    fail_msg: >-
+      chrome_headless_shell_sha256 = {{ chrome_headless_shell_sha256 }}，不是 sha256。
+      換版本時要自己下載算出 sha256（shasum -a 256），和版本號一起改。
+    quiet: true
+
+- name: ~/.local/bin/chrome-headless-shell 現在是什麼
+  ansible.builtin.stat:
+    path: "{{ mac_node_chs_bin }}"
+  register: _chs_bin
+  check_mode: false
+
+# 一般檔案：看有沒有標記那行（只比對不含版本的前半，換版本時舊版本放的那支也認得）。
+- name: 有沒有這裡放的標記
+  ansible.builtin.command:
+    argv: [/usr/bin/grep, -qF, "{{ mac_node_chs_marker }} ", "{{ mac_node_chs_bin }}"]
+  register: _chs_marker
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: _chs_bin.stat.exists and (_chs_bin.stat.isreg | default(false))
+
+# 這裡放的是帶標記的轉接腳本。另外認一種：這個 tag 第一版（2026-11-16）放的 symlink（指進
+# ~/.local/chrome-headless-shell-<版本>），它跑不起來，下面會換成轉接腳本。過渡用，各台都換過之後可以拿掉。
+# 其他的（沒有標記的一般檔案、指到別處的 symlink）是別的方式放的，兩套並存時 pin 沒有意義，
+# 也不知道該不該蓋掉 —— 停下來，不猜。
+# 檔案不在時 stat 沒有 isreg / islnk，而 fail_msg 在斷言通過時也會先展開（ansible-core 2.21 實測）→ 一律 default(false)。
+- name: 是不是這裡放的
+  ansible.builtin.set_fact:
+    _chs_old_link: >-
+      {{ _chs_bin.stat.exists and (_chs_bin.stat.islnk | default(false))
+         and (_chs_bin.stat.lnk_target | default('')).startswith(mac_node_home ~ '/.local/chrome-headless-shell-')
+         and (_chs_bin.stat.lnk_target | default('')).endswith('/chrome-headless-shell') }}
+    _chs_ours_script: "{{ (_chs_marker.rc | default(1)) == 0 }}"
+
+- name: 不能已經有別的方式放的 chrome-headless-shell
+  ansible.builtin.assert:
+    that: not _chs_bin.stat.exists or (_chs_old_link | bool) or (_chs_ours_script | bool)
+    fail_msg: >-
+      {{ mac_node_chs_bin }} 已經存在（{{ ('symlink → ' ~ (_chs_bin.stat.lnk_target | default('?'))) if (_chs_bin.stat.islnk | default(false)) else '沒有 mac-bootstrap 標記的檔案' }}），
+      不是這裡放的。先用原本的方式移除，再重跑 make install TAGS=chrome-headless-shell。
+    quiet: true
+
+# 「裝了沒」看檔案在不在，不執行（同 codex）：make check 也會跑到這裡。
+- name: chrome-headless-shell {{ chrome_headless_shell_version }} 裝了沒
+  ansible.builtin.stat:
+    path: "{{ mac_node_chs_dir }}/{{ item }}"
+  loop: "{{ chrome_headless_shell_required }}"
+  register: _chs_pkg
+  check_mode: false
+
+- name: 整理結果
+  ansible.builtin.set_fact:
+    _chs_pkg_ok: "{{ _chs_pkg.results | rejectattr('stat.exists') | list | length == 0 }}"
+
+- name: 乾跑：會下載 chrome-headless-shell {{ chrome_headless_shell_version }}
+  ansible.builtin.debug:
+    msg: >-
+      會下載 {{ chrome_headless_shell_asset }}.zip（Chrome for Testing {{ chrome_headless_shell_version }}）並放到
+      {{ mac_node_chs_dir }}，~/.local/bin/chrome-headless-shell 放一支 exec 到裡面執行檔的轉接腳本
+  changed_when: true
+  when: ansible_check_mode and not (_chs_pkg_ok | bool)
+
+# --check 時 tempfile 不會給路徑，整段跳過（上面那則代替它報告）。
+- name: 下載並放好 chrome-headless-shell {{ chrome_headless_shell_version }}
+  when: not (_chs_pkg_ok | bool) and not ansible_check_mode
+  block:
+    - name: 暫存目錄
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: -mac-bootstrap-chrome-headless-shell
+      register: _chs_tmp
+
+    # 官方沒有 checksum 檔，對 defaults 裡 pin 的 sha256 驗證；對不上 get_url 會失敗，什麼都不放。
+    - name: 下載 Chrome for Testing 的 zip（對 pin 的 sha256 驗證）
+      ansible.builtin.get_url:
+        url: "{{ chrome_headless_shell_url }}"
+        dest: "{{ _chs_tmp.path }}/{{ chrome_headless_shell_asset }}.zip"
+        checksum: "sha256:{{ chrome_headless_shell_sha256 }}"
+        mode: "0644"
+
+    # 用 ditto 不用 unzip（同 godot）：symlink、權限、程式碼簽章都要原樣保留。
+    # 不用 ansible.builtin.unarchive：它在 macOS 上要 GNU tar。
+    - name: 解開
+      ansible.builtin.command:
+        argv: [/usr/bin/ditto, -x, -k, "{{ _chs_tmp.path }}/{{ chrome_headless_shell_asset }}.zip", "{{ _chs_tmp.path }}/x"]
+      changed_when: true
+
+    - name: zip 裡該有的檔都要在
+      ansible.builtin.stat:
+        path: "{{ _chs_tmp.path }}/x/{{ chrome_headless_shell_asset }}/{{ item }}"
+      loop: "{{ chrome_headless_shell_required }}"
+      register: _chs_unpacked
+      failed_when: not (_chs_unpacked.stat.exists and _chs_unpacked.stat.isreg)
+
+    - name: ~/.local
+      ansible.builtin.file:
+        path: "{{ mac_node_home }}/.local"
+        state: directory
+        mode: "0755"
+
+    # 先解到暫存再整包搬過去：中途失敗不會留下半套的 ~/.local/chrome-headless-shell-<版本>。
+    - name: 清掉上次沒完成的目錄
+      ansible.builtin.file:
+        path: "{{ mac_node_chs_dir }}"
+        state: absent
+
+    - name: 搬到 ~/.local/chrome-headless-shell-{{ chrome_headless_shell_version }}
+      ansible.builtin.command:
+        argv: [/bin/mv, "{{ _chs_tmp.path }}/x/{{ chrome_headless_shell_asset }}", "{{ mac_node_chs_dir }}"]
+      changed_when: true
+
+  always:
+    - name: 清掉暫存
+      ansible.builtin.file:
+        path: "{{ _chs_tmp.path }}"
+        state: absent
+      when: _chs_tmp.path is defined
+
+- name: ~/.local/bin
+  ansible.builtin.file:
+    path: "{{ mac_node_home }}/.local/bin"
+    state: directory
+    mode: "0755"
+
+# 第一版放的 symlink 先拿掉再寫轉接腳本：copy 碰到 symlink 會照著它去比對 178 MB 的執行檔，
+# 換掉的方式也不直觀，先刪最清楚。
+- name: 拿掉第一版放的 symlink
+  ansible.builtin.file:
+    path: "{{ mac_node_chs_bin }}"
+    state: absent
+  when: _chs_old_link | bool
+
+# 內容只跟版本有關：版本不變就不動（冪等），換版本時改寫成新的路徑。
+- name: ~/.local/bin/chrome-headless-shell（轉接腳本 → chrome-headless-shell-{{ chrome_headless_shell_version }}）
+  ansible.builtin.copy:
+    dest: "{{ mac_node_chs_bin }}"
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      {{ mac_node_chs_marker }} {{ chrome_headless_shell_version }}
+      exec {{ (mac_node_chs_dir ~ '/chrome-headless-shell') | quote }} "$@"
+
+# 只認「chrome-headless-shell-<a.b.c.d>」這種名字（Chrome 的版本是四段），免得誤刪 ~/.local 裡別的東西。
+- name: 找舊版本
+  ansible.builtin.find:
+    paths: "{{ mac_node_home }}/.local"
+    patterns: '^chrome-headless-shell-[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$'
+    use_regex: true
+    file_type: directory
+  register: _chs_dirs
+  check_mode: false
+
+- name: 刪舊版本
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _chs_dirs.files | rejectattr('path', 'equalto', mac_node_chs_dir) | list }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+# ---- 確認 --------------------------------------------------------------------
+# 兩段檢查的內容在 defaults（mac_node_chs_*_probe），make verify 用的是同一段。
+# 兩段都經 ~/.local/bin 的轉接腳本叫，跟截圖腳本走同一條路。
+- name: 讀 chrome-headless-shell --version
+  ansible.builtin.shell:
+    cmd: "{{ mac_node_chs_version_probe }}"
+    executable: /bin/bash
+  register: _chs_v
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: --version 要等於 pin 的版本
+  ansible.builtin.assert:
+    that: (_chs_v.stdout | trim).endswith(' ' ~ chrome_headless_shell_version)
+    fail_msg: "chrome-headless-shell --version = {{ _chs_v.stdout | trim }}，應為 {{ chrome_headless_shell_version }}"
+    quiet: true
+  when: not ansible_check_mode
+
+- name: 開一次 390 寬的頁面
+  ansible.builtin.shell:
+    cmd: "{{ mac_node_chs_width_probe }}"
+    executable: /bin/bash
+  register: _chs_w
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: 指定 390 寬，版面就要是 390 寬
+  ansible.builtin.assert:
+    that: _chs_w.rc == 0
+    fail_msg: "{{ _chs_w.stdout | default('') | trim }}"
+    quiet: true
+  when: not ansible_check_mode

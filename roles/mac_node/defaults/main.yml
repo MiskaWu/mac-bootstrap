@@ -219,6 +219,59 @@ mac_node_codex_host_probe: |
   "$h" --help >/dev/null 2>&1 || { echo "${h} 跑不起來"; exit 1; }
   echo "$h"
 
+# ---- chrome-headless-shell（tasks/chrome-headless-shell.yml）--------------------
+# Chrome for Testing 的 chrome-headless-shell（舊版的無頭模式），jury 的截圖腳本拍 390 寬的手機截圖用。
+# 一般 Google Chrome 的無頭模式最窄 500，手機寬度的圖會被切掉（理由見 tasks/chrome-headless-shell.yml 檔頭）。
+#
+# 版本：2026-11-16 查 last-known-good-versions.json 的 Stable。
+# **Chrome for Testing 沒有公布 checksum**，sha256 是自己下載這一版的 zip 算出來的（shasum -a 256），
+# 同時對過 Google Cloud Storage 回的 x-goog-hash（md5）確認下載沒壞。
+# **換版本時兩個值要一起改**：只改版本號，下載會因為 sha256 對不上而失敗（不會裝進來）。步驟：
+#   1. 查 https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json 的 Stable 版本號
+#   2. 下載 chrome_headless_shell_url（換成新版本號）那個 zip，shasum -a 256 算出來
+#   3. 兩個值一起改，再 make install TAGS=chrome-headless-shell：裝新版、改寫轉接腳本、刪舊版目錄
+# 在 config.yml 覆蓋時也一樣，兩個一起寫。
+chrome_headless_shell_version: "157.0.8103.78"
+chrome_headless_shell_sha256: "17bf66d53c1b1104dcb641c5b331cd4ac5d200c778f5feed0934a0b92deaf8d6"
+chrome_headless_shell_asset: chrome-headless-shell-mac-arm64
+chrome_headless_shell_url: "https://storage.googleapis.com/chrome-for-testing-public/{{ chrome_headless_shell_version }}/mac-arm64/{{ chrome_headless_shell_asset }}.zip"
+# 整包放這裡（同 codex 的 ~/.local/codex-<版本>）。chs = chrome-headless-shell。
+mac_node_chs_dir: "{{ mac_node_home }}/.local/chrome-headless-shell-{{ chrome_headless_shell_version }}"
+# ~/.local/bin/chrome-headless-shell 是一支轉接腳本，exec 到版本目錄裡的執行檔。**不能用 symlink**：
+# 經 symlink 叫時找不到 icudtl.dat，exit 133（2026-11-16 實測，理由見 tasks/chrome-headless-shell.yml 檔頭）。
+mac_node_chs_bin: "{{ mac_node_home }}/.local/bin/chrome-headless-shell"
+# 轉接腳本第二行的標記，後面接版本。「是不是這裡放的」（安裝時的斷言、移除）只比對這段不含版本的前半。
+mac_node_chs_marker: "# mac-bootstrap: chrome-headless-shell"
+# zip 外層目錄（chrome-headless-shell-mac-arm64/）裡一定要有的檔。「裝了沒」與「解開後對不對」都看這份。
+chrome_headless_shell_required:
+  - chrome-headless-shell
+  - headless_lib_data.pak
+  - icudtl.dat
+
+# 下面兩段 bash 是「chrome-headless-shell 能不能用」的檢查，安裝後的斷言（tasks/chrome-headless-shell.yml）
+# 與 make verify 用同一段，不各寫一份（同 codex 的 mac_node_codex_*_probe）。
+#
+# (1) 讀版本。印「<產品名> <版本>」就結束（157.0.8103.78 的 headless/app/headless_shell.cc：在起瀏覽器之前就
+#     printf 後 return），不建設定檔、不碰 ~/Library。也不載入資源：經 symlink 叫時它照樣正常，
+#     找不到 icudtl.dat 要靠 (2) 才抓得到。
+mac_node_chs_version_probe: |
+  {{ mac_node_chs_bin | quote }} --version
+# (2) 真的開一次 390 寬的頁面，看版面寬度（innerWidth）是不是 390 —— 截圖腳本要的就是這件事。
+#     只看 --version 抓不到「換成一般 Chrome 或之後的版本也有最小寬度」這種情況：一般 Chrome 指定 390 時
+#     innerWidth 是 500，不報錯（2026-11-16 實測）。
+#     參數照 jury 的 scripts/headless-chrome.sh：用完就刪的 --user-data-dir、--use-mock-keychain（不跳鑰匙圈詢問）。
+#     --dump-dom 把 document.documentElement.outerHTML 印到 stdout；頁面用 document.write 把 innerWidth 寫進 body。
+#     成功印一行說明；失敗印原因並 exit 1。
+mac_node_chs_width_probe: |
+  t=$(/usr/bin/mktemp -d) || exit 1
+  out=$({{ mac_node_chs_bin | quote }} --headless --user-data-dir="$t" --use-mock-keychain --no-first-run --no-default-browser-check --window-size=390,844 --dump-dom 'data:text/html,<script>document.write(innerWidth)</script>' 2>/dev/null)
+  rc=$?
+  /bin/rm -rf "${t:?}"
+  [ "$rc" -eq 0 ] || { echo "chrome-headless-shell 跑不起來（exit ${rc}）"; exit 1; }
+  w=$(printf '%s' "$out" | /usr/bin/sed -n 's#.*<body>\([0-9][0-9]*\)</body>.*#\1#p')
+  [ "$w" = 390 ] || { echo "指定 390 寬，innerWidth 卻是 ${w:-讀不到}：手機截圖會被切掉"; exit 1; }
+  echo "指定 390 寬，innerWidth 是 390"
+
 # ---- 移除（make uninstall）---------------------------------------------------
 # DATA=1 → -e mac_node_uninstall_data=true：連快取、下載的 runtime、VM 磁碟一起刪。
 mac_node_uninstall_data: false
@@ -263,6 +316,7 @@ mac_node_allowed_user_bins:
   - .local/bin/claude                         # claude
   - .local/bin/cc-jobs                        # claude-config 的 make link 連進來的（背景工作分流表）
   - .local/bin/codex                          # codex（官方 release 的單一執行檔）
+  - .local/bin/chrome-headless-shell          # chrome-headless-shell（轉接腳本，exec 到 ~/.local/chrome-headless-shell-<版本>）
   - .local/bin/docker                         # docker-compat（exec podman 的 shim）
   - .local/bin/godot                          # godot
   - .local/bin/godot-*                        # godot（每個版本一個）
