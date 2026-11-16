@@ -132,6 +132,10 @@
   ansible.builtin.import_tasks: gh.yml
   tags: [user, gh]
 
+- name: just（brew；專案的入口指令）
+  ansible.builtin.import_tasks: just.yml
+  tags: [user, just]
+
 # ---- 收尾 -------------------------------------------------------------------
 # profile 放在 claude-rc 前面：伺服器啟動時 PATH 必須已經對。
 # 內容看機器上實際有什麼（stat），不看開關。

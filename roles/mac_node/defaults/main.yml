@@ -284,7 +284,7 @@ arrive_home_urls: []
 # brew 上「允許存在」的頂層套件。多出來的 make verify 會列出來（只報告，不移除）。
 # 來源：make 由 bootstrap.sh 裝、ansible 由 Makefile 裝、其餘由各自的 task 檔裝。
 # 加一個 brew 套件的 task 時，回來這裡補一行。
-mac_node_brew_allowed_formulae: [make, ansible, tmux, go, uv, pnpm, podman, docker-compose, bash, awscli, gh]
+mac_node_brew_allowed_formulae: [make, ansible, tmux, go, uv, pnpm, podman, docker-compose, bash, awscli, gh, just]
 # claude、google-chrome、chrome-remote-desktop-host：新機器上由 cask-app.yml 裝的（這台是 IaC 之前手動裝的，brew 裡沒有）。
 mac_node_brew_allowed_casks: ["{{ mac_node_tailscale_cask }}", claude, google-chrome, chrome-remote-desktop-host]
 

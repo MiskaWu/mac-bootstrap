@@ -206,6 +206,7 @@
         [ -x "$b/bash" ] && want="$want bash"
         [ -x "$b/aws" ] && want="$want aws"
         [ -x "$b/gh" ] && want="$want gh"
+        [ -x "$b/just" ] && want="$want just"
         bad=""
         for mode in ssh launchd; do
           flag=""; [ $mode = launchd ] && flag="-l"

@@ -28,6 +28,7 @@
     - { tag: chrome-headless-shell, path: "{{ mac_node_chs_dir }}/chrome-headless-shell",                         desc: "chrome-headless-shell {{ chrome_headless_shell_version }}（Chrome for Testing → ~/.local/chrome-headless-shell-<版本>，~/.local/bin 放轉接腳本；jury 拍 390 寬手機截圖用）" }
     - { tag: bash,            path: "{{ mac_node_brew_prefix }}/bin/bash",                                      desc: "bash 5（brew；PATH 上排在 /bin/bash 3.2 前面）" }
     - { tag: awscli,          path: "{{ mac_node_brew_prefix }}/bin/aws",                                        desc: "AWS CLI v2（brew；登入手動：aws configure sso）" }
+    - { tag: just,            path: "{{ mac_node_brew_prefix }}/bin/just",                                       desc: "just（brew；每個專案的入口指令）" }
     - { tag: gh,              path: "{{ mac_node_brew_prefix }}/bin/gh",                                         desc: "GitHub CLI（brew；登入手動：gh auth login）" }
     - { tag: claude-guard,    path: "{{ mac_node_claude_managed_dir }}/managed-settings.d/mac-bootstrap.json", desc: "要裝東西先問（sudo；整台電腦層的 permissions.ask）" }
     - { tag: claude-md,       path: "{{ mac_node_claude_managed_dir }}/CLAUDE.md",                               desc: "這台的規矩（sudo；整台電腦層的 CLAUDE.md）" }

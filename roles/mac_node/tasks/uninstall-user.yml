@@ -166,6 +166,19 @@
 # 照樣有效），只會少掉「這台登入過什麼」的線索，而且刪錯沒有退路。要清就先到對方撤銷，再自己刪。
 # DATA=1 只刪「重新登入就會再生」的暫時 token 與快取：它們本來就會過期，刪掉的代價只是再登入一次。
 # 不在這裡跑 gh auth logout / aws sso logout：那是帳號端的動作（會呼叫 GitHub / AWS），由你決定。
+- name: just
+  tags: [just]
+  block:
+    - name: brew uninstall just
+      community.general.homebrew:
+        name: just
+        state: absent
+
+    - name: just —— 登記
+      ansible.builtin.set_fact:
+        _uninstall_done: "{{ _uninstall_done + ['just'] }}"
+        _uninstall_brew: true
+
 - name: GitHub CLI
   tags: [gh]
   block:

@@ -1,0 +1,9 @@
+---
+# just（brew，單一執行檔、沒有 brew 相依）：每個專案的入口指令（just setup / test / ci …）。
+# 選它不選 make 的理由：Linux、macOS、Windows 原生的行為一致；macOS 內建的 make 是 2006 年的 3.81，
+# Windows 原生沒有 make。不放進容器：它是「在主機上叫指令」的那一層。
+# state: latest：跟著 brew 更新（同 go、uv、gh）。作者承諾不出破壞既有 justfile 的版本。
+- name: just（brew）
+  community.general.homebrew:
+    name: just
+    state: latest
