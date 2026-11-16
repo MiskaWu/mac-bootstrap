@@ -162,69 +162,6 @@ claude_guard_ask: >-
      + (['Bash(*/'] | product(claude_guard_ask_commands) | map('join') | map('regex_replace', '$', '*)') | list)
      + claude_guard_ask_extra }}
 
-# 過渡用：2026-11-16 放在 ~/.claude/settings.json 的舊版清單（開頭加 * 的寫法，會連引號裡的字一起比對到）。
-# 只給 make uninstall TAGS=claude-guard-user-legacy 拿掉舊規則用；遷移完跟那段一起刪。
-claude_guard_ask_legacy:
-  # 主機套件管理
-  - "Bash(*brew install *)"
-  - "Bash(*brew reinstall *)"
-  - "Bash(*brew upgrade*)"
-  - "Bash(*brew uninstall *)"
-  - "Bash(*brew tap *)"
-  - "Bash(*brew link *)"
-  - "Bash(*brew bundle*)"
-  - "Bash(*installer -pkg*)"
-  - "Bash(*softwareupdate -i*)"
-  - "Bash(*softwareupdate --install*)"
-  - "Bash(*sudo *)"
-  # 透過 IaC 或專案的 make 裝到主機（這也是改主機，照樣先問）
-  - "Bash(*make install*)"
-  - "Bash(*make uninstall*)"
-  - "Bash(*ansible-playbook *)"
-  # 語言的全域安裝
-  - "Bash(*npm install -g*)"
-  - "Bash(*npm i -g*)"
-  - "Bash(*npm install --global*)"
-  - "Bash(*npm i --global*)"
-  - "Bash(*npm install * -g*)"
-  - "Bash(*npm i * -g*)"
-  - "Bash(*npm link*)"
-  - "Bash(*pnpm add -g*)"
-  - "Bash(*pnpm add --global*)"
-  - "Bash(*pnpm add * -g*)"
-  - "Bash(*pnpm install -g*)"
-  - "Bash(*pnpm i -g*)"
-  - "Bash(*pnpm link --global*)"
-  - "Bash(*pnpm env *)"
-  - "Bash(*yarn global *)"
-  - "Bash(*pip install *)"
-  - "Bash(*pip3 install *)"
-  - "Bash(*pipx install *)"
-  - "Bash(*uv tool install *)"
-  - "Bash(*cargo install *)"
-  - "Bash(*cargo binstall *)"
-  - "Bash(*rustup default *)"
-  - "Bash(*go install*)"
-  - "Bash(*gem install *)"
-  # 下載下來直接交給 shell 跑的安裝程式
-  - "Bash(sh)"
-  - "Bash(bash)"
-  - "Bash(zsh)"
-  - "Bash(sh -s*)"
-  - "Bash(bash -s*)"
-  - "Bash(*sh -c *curl *)"
-  - "Bash(*sh -c *wget *)"
-  # 主機的設定檔與 PATH 上的目錄（這些由 IaC 管）。Edit 規則也涵蓋 Write。
-  - "Edit(~/.zshenv)"
-  - "Edit(~/.zprofile)"
-  - "Edit(~/.zshrc)"
-  - "Edit(~/.bashrc)"
-  - "Edit(~/.bash_profile)"
-  - "Edit(~/.profile)"
-  - "Edit(~/Library/LaunchAgents/**)"
-  - "Edit(~/.local/bin/**)"
-  - "Edit(~/bin/**)"
-
 # ---- Godot（tasks/godot.yml）--------------------------------------------------
 # 多版本並存：列幾個裝幾個（~/Applications/Godot-<版本>.app），清單上沒有的會被移除。
 # 版本寫法同官方 release tag 去掉 -stable：x.y.0 是 "4.7"、之後是 "4.7.2"。

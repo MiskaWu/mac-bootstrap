@@ -298,14 +298,15 @@
         fi
         echo "${n} 條安裝類指令會先問"
 
-    # 過渡：2026-11-16 以前放在 ~/.claude（個人層）。搬到整台電腦層之後要拿掉，否則接上 claude-config 時會一起進共用 repo。
+    # 過渡：2026-11-16 以前放在 ~/.claude（個人層）。~/.claude 現在是 claude-config 的連結，
+    # 舊版留著會跟著進共用 repo。claude-config 的 make link 會把舊檔搬成 .pre-link 備份。
     - name: "~/.claude 沒有舊版的規矩與護欄"
       level: warn
       cmd: |
         left=""
         /usr/bin/grep -q 'BEGIN mac-bootstrap (managed)' "$HOME/.claude/CLAUDE.md" 2>/dev/null && left="$left CLAUDE.md 的 block"
-        /usr/bin/grep -qF {{ ('"' ~ (claude_guard_ask_legacy | first) ~ '"') | quote }} "$HOME/.claude/settings.json" 2>/dev/null && left="$left settings.json 的護欄"
-        [ -z "$left" ] || { echo "還有：${left# }（make uninstall TAGS=claude-guard-user-legacy,claude-md-user-legacy）"; exit 1; }
+        /usr/bin/grep -qF '"Bash(*brew install *)"' "$HOME/.claude/settings.json" 2>/dev/null && left="$left settings.json 的護欄"
+        [ -z "$left" ] || { echo "還有：${left# }（到 claude-config 跑 make link，舊檔會搬成 .pre-link 備份）"; exit 1; }
         echo "沒有"
 
     - name: "全域 git 身分"
